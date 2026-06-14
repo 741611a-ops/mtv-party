@@ -2,13 +2,18 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const url = require('url');
 
 const BOT_TOKEN  = process.env.BOT_TOKEN  || '';
 const ADMIN_CHAT = process.env.ADMIN_CHAT || '';
 const ADMIN_PWD  = process.env.ADMIN_PWD  || 'mtv2025admin';
 const PORT       = process.env.PORT       || 3000;
-const DATA_FILE  = path.join(__dirname, 'bookings.json');
+const DATA_FILE  = path.join('/tmp', 'bookings.json');
+
+// Создаём файл при старте если не существует
+if (!fs.existsSync(DATA_FILE)) {
+  fs.writeFileSync(DATA_FILE, '{}');
+  console.log('Создан bookings.json в /tmp');
+}
 
 function loadData() {
   try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); }
@@ -22,7 +27,6 @@ function sendTelegram(text) {
   if (!BOT_TOKEN) { console.log('[TG] BOT_TOKEN не задан'); return; }
   if (!ADMIN_CHAT) { console.log('[TG] ADMIN_CHAT не задан'); return; }
   const body = JSON.stringify({ chat_id: ADMIN_CHAT, text, parse_mode: 'HTML' });
-  console.log('[TG] Отправка -> chat_id=' + ADMIN_CHAT);
   const req = https.request({
     hostname: 'api.telegram.org',
     path: '/bot' + BOT_TOKEN + '/sendMessage',
@@ -52,125 +56,121 @@ const MIME = {
   '.ico':  'image/x-icon',
 };
 
-const server = http.createServer((req, res) => {
-  const parsed = url.parse(req.url, true);
-  const pathname = parsed.pathname;
+function readBody(req) {
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => resolve(body));
+  });
+}
+
+const server = http.createServer(async (req, res) => {
+  const pathname = new URL(req.url, 'http://localhost').pathname;
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
+  // GET /api/bookings — публичный, только факт бронирования
   if (pathname === '/api/bookings' && req.method === 'GET') {
     const data = loadData();
-    const publicData = {};
+    const pub = {};
     for (const [k, v] of Object.entries(data)) {
-      publicData[k] = { bookedAt: v.bookedAt };
+      pub[k] = { bookedAt: v.bookedAt };
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(publicData));
+    res.end(JSON.stringify(pub));
     return;
   }
 
+  // POST /api/admin/bookings — только для организатора, полные данные
   if (pathname === '/api/admin/bookings' && req.method === 'POST') {
-    let body = '';
-    req.on('data', d => body += d);
-    req.on('end', () => {
-      try {
-        const { pwd } = JSON.parse(body);
-        if (pwd !== ADMIN_PWD) {
-          res.writeHead(403, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'forbidden' })); return;
-        }
-        const data = loadData();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(data));
-      } catch(e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
+    const body = await readBody(req);
+    try {
+      const { pwd } = JSON.parse(body);
+      if (pwd !== ADMIN_PWD) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'forbidden' })); return;
       }
-    });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(loadData()));
+    } catch(e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
     return;
   }
 
+  // POST /api/book — бронирование
   if (pathname === '/api/book' && req.method === 'POST') {
-    let body = '';
-    req.on('data', d => body += d);
-    req.on('end', () => {
-      try {
-        const { id, name, phone } = JSON.parse(body);
-        const data = loadData();
-        if (data[id]) {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, taken: true }));
-          return;
-        }
-        const bookedAt = new Date().toISOString();
-        data[id] = { name, phone, bookedAt };
-        saveData(data);
-
-        const type = id.startsWith('g') ? '👗 Девушка' : '👔 Парень';
-        const idx = parseInt(id.split('-')[1]);
-        sendTelegram(
-          '🎤 <b>Новая бронь!</b>\n\n' +
-          type + '\n' +
-          '👤 Имя: <b>' + name + '</b>\n' +
-          '📱 Телефон: <b>' + phone + '</b>\n' +
-          '🕐 Время: ' + new Date().toLocaleString('ru-RU')
-        );
-
+    const body = await readBody(req);
+    try {
+      const { id, name, phone } = JSON.parse(body);
+      const data = loadData();
+      if (data[id]) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, bookedAt }));
-      } catch(e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
+        res.end(JSON.stringify({ ok: false, taken: true })); return;
       }
-    });
+      const bookedAt = new Date().toISOString();
+      data[id] = { name, phone, bookedAt };
+      saveData(data);
+      const type = id.startsWith('g') ? '👗 Девушка' : '👔 Парень';
+      sendTelegram(
+        '🎤 <b>Новая бронь!</b>\n\n' +
+        type + '\n' +
+        '👤 Имя: <b>' + name + '</b>\n' +
+        '📱 Телефон: <b>' + phone + '</b>\n' +
+        '🕐 Время: ' + new Date().toLocaleString('ru-RU')
+      );
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, bookedAt }));
+    } catch(e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
     return;
   }
 
+  // POST /api/cancel — отмена брони
   if (pathname === '/api/cancel' && req.method === 'POST') {
-    let body = '';
-    req.on('data', d => body += d);
-    req.on('end', () => {
-      try {
-        const { id } = JSON.parse(body);
-        const data = loadData();
-        delete data[id];
-        saveData(data);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-      } catch(e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
-      }
-    });
+    const body = await readBody(req);
+    try {
+      const { id } = JSON.parse(body);
+      const data = loadData();
+      delete data[id];
+      saveData(data);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch(e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
     return;
   }
 
+  // POST /api/admin/delete — удаление брони организатором
   if (pathname === '/api/admin/delete' && req.method === 'POST') {
-    let body = '';
-    req.on('data', d => body += d);
-    req.on('end', () => {
-      try {
-        const { id, pwd } = JSON.parse(body);
-        if (pwd !== ADMIN_PWD) {
-          res.writeHead(403, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'forbidden' })); return;
-        }
-        const data = loadData();
-        delete data[id];
-        saveData(data);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-      } catch(e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
+    const body = await readBody(req);
+    try {
+      const { id, pwd } = JSON.parse(body);
+      if (pwd !== ADMIN_PWD) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'forbidden' })); return;
       }
-    });
+      const data = loadData();
+      delete data[id];
+      saveData(data);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch(e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
     return;
   }
 
+  // Статические файлы
   let filePath = path.join(__dirname, pathname === '/' ? 'index.html' : pathname);
   const ext = path.extname(filePath);
   if (!ext) filePath = path.join(__dirname, 'index.html');
@@ -179,7 +179,7 @@ const server = http.createServer((req, res) => {
     if (err) {
       fs.readFile(path.join(__dirname, 'index.html'), (e2, c2) => {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(c2);
+        res.end(c2 || 'Not found');
       });
       return;
     }
@@ -190,6 +190,7 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log('MTV 2000s Party запущен на порту ' + PORT);
-  console.log('BOT_TOKEN задан: ' + (BOT_TOKEN ? 'ДА' : 'НЕТ'));
-  console.log('ADMIN_CHAT задан: ' + (ADMIN_CHAT ? 'ДА' : 'НЕТ'));
+  console.log('BOT_TOKEN: ' + (BOT_TOKEN ? 'ДА' : 'НЕТ'));
+  console.log('ADMIN_CHAT: ' + (ADMIN_CHAT ? 'ДА' : 'НЕТ'));
+  console.log('DATA_FILE: ' + DATA_FILE);
 });
