@@ -350,72 +350,71 @@ const BD=[
 ];
 
 // ── STATE ──────────────────────────────────────
-let bookings = {};
-let myBookings = {};
-let pending = null;
-let adminIn = false;
+var bookings = {};
+var myBookings = {};
+var pending = null;
+var adminIn = false;
 
-// ── API CALLS ──────────────────────────────────
-async function apiGet(path) {
-  const r = await fetch(API_BASE + path);
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+// ── API ──────────────────────────────────────
+function apiGet(path, cb) {
+  fetch(API_BASE + path)
+    .then(function(r) { return r.json(); })
+    .then(cb)
+    .catch(function() { cb({}); });
 }
-async function apiPost(path, body) {
-  const r = await fetch(API_BASE + path, {
+function apiPost(path, body, cb) {
+  fetch(API_BASE + path, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
-  });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+  })
+  .then(function(r) { return r.json(); })
+  .then(cb || function(){})
+  .catch(function(e) { if(cb) cb({error: e.message}); });
 }
 
-async function loadBookings() {
-  try {
-    const data = await apiGet('/bookings');
+function loadBookings(cb) {
+  apiGet('/bookings', function(data) {
     bookings = data || {};
-  } catch(e) {
-    console.error('Load error:', e);
-    bookings = {};
-  }
+    if (cb) cb();
+  });
 }
 
 // ── RENDER ─────────────────────────────────────
 function cardHTML(d, type, i) {
-  const id = `${type}-${i}`;
-  const bk = bookings[id];
-  const mine = !!myBookings[id];
-  const cls = `card ${type==='g'?'g':'b'}${bk?' bkd':''}${mine?' mine':''}`;
-  return `<div class="${cls}" id="card-${id}">
-    <div class="badge-mine">МОЙ ОБРАЗ ✓</div>
-    <div class="badge-bkd">ЗАБРОНИРОВАНО</div>
-    <div class="c-num">${type==='g'?'♀':'♂'} ${String(i+1).padStart(2,'0')}</div>
-    <div class="c-name">${d.n}</div>
-    <div class="c-era">${d.e}</div>
-    <div class="c-look">${d.l}</div>
-    <div class="c-tags">${d.t.map(x=>`<span class="tag">${x}</span>`).join('')}</div>
-    <div class="c-diff">${d.d} сложность</div>
-    <div class="c-tip">${d.tip}</div>
-    ${!bk ? `<button class="btn-bk" onclick="openM('${id}','${d.n.replace(/'/g,"\\'")}')">Забронировать образ</button>` : ''}
-    ${mine ? `<button class="btn-cncl" onclick="cancelBook('${id}')">Отменить мою бронь</button>` : ''}
-  </div>`;
+  var id = type + '-' + i;
+  var bk = bookings[id];
+  var mine = !!myBookings[id];
+  var cls = 'card ' + (type==='g'?'g':'b') + (bk?' bkd':'') + (mine?' mine':'');
+  return '<div class="'+cls+'" id="card-'+id+'">'+
+    '<div class="badge-mine">МОЙ ОБРАЗ ✓</div>'+
+    '<div class="badge-bkd">ЗАБРОНИРОВАНО</div>'+
+    '<div class="c-num">'+(type==='g'?'♀':'♂')+' '+String(i+1).padStart(2,'0')+'</div>'+
+    '<div class="c-name">'+d.n+'</div>'+
+    '<div class="c-era">'+d.e+'</div>'+
+    '<div class="c-look">'+d.l+'</div>'+
+    '<div class="c-tags">'+d.t.map(function(x){return '<span class="tag">'+x+'</span>';}).join('')+'</div>'+
+    '<div class="c-diff">'+d.d+' сложность</div>'+
+    '<div class="c-tip">'+d.tip+'</div>'+
+    (!bk ? '<button class="btn-bk" onclick="openM(''+id+'',''+d.n.replace(/'/g,"\'")+'')" >Забронировать образ</button>' : '')+
+    (mine ? '<button class="btn-cncl" onclick="cancelBook(''+id+'')">Отменить мою бронь</button>' : '')+
+  '</div>';
 }
 
 function updateCounts() {
-  const gLen = GD.length, bLen = BD.length;
+  var gLen = GD.length, bLen = BD.length;
   document.getElementById('cnt-g').textContent = gLen;
   document.getElementById('cnt-b').textContent = bLen;
   document.getElementById('num-g').textContent = gLen;
   document.getElementById('num-b').textContent = bLen;
-  const tot = Object.keys(bookings).length;
-  const total = gLen + bLen;
-  document.getElementById('hero-sub').textContent = `🎤 ${total} образов · ${total-tot} свободных · ${tot} забронировано`;
+  var tot = Object.keys(bookings).length;
+  var total = gLen + bLen;
+  document.getElementById('hero-sub').textContent = '🎤 '+total+' образов · '+(total-tot)+' свободных · '+tot+' забронировано';
 }
 
 function render() {
-  document.getElementById('grid-g').innerHTML = GD.map((d,i) => cardHTML(d,'g',i)).join('');
-  document.getElementById('grid-b').innerHTML = BD.map((d,i) => cardHTML(d,'b',i)).join('');
+  document.getElementById('grid-g').innerHTML = GD.map(function(d,i){return cardHTML(d,'g',i);}).join('');
+  document.getElementById('grid-b').innerHTML = BD.map(function(d,i){return cardHTML(d,'b',i);}).join('');
   updateCounts();
   if (adminIn) renderAdmin();
 }
@@ -430,58 +429,56 @@ function openM(id, name) {
   document.getElementById('err-name').style.display = 'none';
   document.getElementById('err-phone').style.display = 'none';
   document.getElementById('modal').classList.add('open');
-  setTimeout(() => document.getElementById('inp-name').focus(), 150);
+  setTimeout(function(){ document.getElementById('inp-name').focus(); }, 150);
 }
 
-document.getElementById('btn-cls').onclick = () => {
+document.getElementById('btn-cls').onclick = function() {
   document.getElementById('modal').classList.remove('open');
   pending = null;
 };
 
-document.getElementById('btn-ok').onclick = async () => {
-  const name = document.getElementById('inp-name').value.trim();
-  const phone = document.getElementById('inp-phone').value.trim();
-  let ok = true;
+document.getElementById('btn-ok').onclick = function() {
+  var name = document.getElementById('inp-name').value.trim();
+  var phone = document.getElementById('inp-phone').value.trim();
+  var ok = true;
   document.getElementById('err-name').style.display = name ? 'none' : 'block'; if (!name) ok = false;
   document.getElementById('err-phone').style.display = phone ? 'none' : 'block'; if (!phone) ok = false;
   if (!ok) return;
 
-  const btn = document.getElementById('btn-ok');
+  var btn = document.getElementById('btn-ok');
   btn.disabled = true; btn.textContent = 'Сохраняем...';
+  var pid = pending;
 
-  try {
-    const res = await apiPost('/book', { id: pending, name, phone });
+  apiPost('/book', { id: pid, name: name, phone: phone }, function(res) {
+    btn.disabled = false; btn.textContent = 'Забронировать ✓';
     if (res.ok) {
-      bookings[pending] = { name, phone, bookedAt: res.bookedAt };
-      myBookings[pending] = true;
+      bookings[pid] = { name: name, phone: phone, bookedAt: res.bookedAt };
+      myBookings[pid] = true;
       document.getElementById('modal').classList.remove('open');
       render();
-      toast(`✓ Образ забронирован, ${name}!`, 'ok');
+      toast('✓ Образ забронирован, ' + name + '!', 'ok');
     } else if (res.taken) {
       document.getElementById('modal').classList.remove('open');
-      await loadBookings(); render();
+      loadBookings(function(){ render(); });
       toast('Упс — образ только что забрали!', 'err');
+    } else {
+      toast('Ошибка сети — попробуй ещё раз', 'err');
     }
-  } catch(e) {
-    toast('Ошибка сети — попробуй ещё раз', 'err');
-  }
-
-  btn.disabled = false; btn.textContent = 'Забронировать ✓';
+  });
 };
 
-async function cancelBook(id) {
+function cancelBook(id) {
   if (!myBookings[id]) return;
-  try {
-    await apiPost('/cancel', { id });
+  apiPost('/cancel', { id: id }, function() {
     delete bookings[id]; delete myBookings[id];
     render(); toast('Бронь отменена', '');
-  } catch(e) { toast('Ошибка — попробуй ещё раз', 'err'); }
+  });
 }
 
 // ── TABS ───────────────────────────────────────
 function show(s, btn) {
-  ['g','b','a'].forEach(x => document.getElementById('sec-'+x).classList.toggle('hidden', x !== s));
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('ag','ab','aa'));
+  ['g','b','a'].forEach(function(x){ document.getElementById('sec-'+x).classList.toggle('hidden', x !== s); });
+  document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('ag','ab','aa'); });
   btn.classList.add(s==='g' ? 'ag' : s==='b' ? 'ab' : 'aa');
 }
 
@@ -494,6 +491,7 @@ function aLogin() {
     renderAdmin();
   } else { document.getElementById('adm-err').classList.remove('hidden'); }
 }
+
 function aLogout() {
   adminIn = false;
   document.getElementById('adm-login').classList.remove('hidden');
@@ -502,91 +500,99 @@ function aLogout() {
   document.getElementById('adm-err').classList.add('hidden');
 }
 
-async function loadAdminBookings() {
-  try {
-    const r = await fetch(API_BASE + '/admin/bookings', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ pwd: ADMIN_PWD })
-    });
-    return await r.json();
-  } catch(e) { return bookings; }
+function renderAdmin() {
+  fetch(API_BASE + '/admin/bookings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ pwd: ADMIN_PWD })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) { drawAdminTable(data); })
+  .catch(function() { drawAdminTable({}); });
 }
 
-async async function renderAdmin() {
-  const fullData = await loadAdminBookings();
-  const entries = Object.entries(fullData).sort((a,b) => new Date(a[1].bookedAt)-new Date(b[1].bookedAt));
-  const gc = entries.filter(([id]) => id.startsWith('g')).length;
-  const bc = entries.filter(([id]) => id.startsWith('b')).length;
-  const total = GD.length + BD.length;
-  document.getElementById('adm-stats').innerHTML = `
-    <div class="stat"><div class="stat-n">${entries.length}</div><div class="stat-l">Всего броней</div></div>
-    <div class="stat"><div class="stat-n">${gc}</div><div class="stat-l">Женских</div></div>
-    <div class="stat"><div class="stat-n">${bc}</div><div class="stat-l">Мужских</div></div>
-    <div class="stat"><div class="stat-n">${total - entries.length}</div><div class="stat-l">Свободных</div></div>`;
-  const tb = document.getElementById('adm-tbody');
-  if (!entries.length) { tb.innerHTML = `<tr><td colspan="7" class="empty-tbl">Пока нет ни одной брони</td></tr>`; return; }
-  tb.innerHTML = entries.map(([id, bk], i) => {
-    const isG = id.startsWith('g');
-    const idx = parseInt(id.split('-')[1]);
-    const data = isG ? GD : BD;
-    const cn = data[idx] ? data[idx].n : id;
-    const dt = new Date(bk.bookedAt).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
-    return `<tr>
-      <td style="color:rgba(255,255,255,.35)">${i+1}</td>
-      <td><strong>${bk.name}</strong></td>
-      <td style="color:rgba(255,255,255,.7)">${bk.phone}</td>
-      <td>${cn}</td>
-      <td><span class="${isG?'bdg-g':'bdg-b'}">${isG?'♀ Девушка':'♂ Парень'}</span></td>
-      <td style="color:rgba(255,255,255,.45);white-space:nowrap">${dt}</td>
-      <td><button class="btn-adm-del" onclick="aDel('${id}')">Удалить</button></td>
-    </tr>`;
+function drawAdminTable(fullData) {
+  var entries = Object.entries(fullData).sort(function(a,b){ return new Date(a[1].bookedAt)-new Date(b[1].bookedAt); });
+  var gc = entries.filter(function(e){ return e[0].startsWith('g'); }).length;
+  var bc = entries.filter(function(e){ return e[0].startsWith('b'); }).length;
+  var total = GD.length + BD.length;
+  document.getElementById('adm-stats').innerHTML =
+    '<div class="stat"><div class="stat-n">'+entries.length+'</div><div class="stat-l">Всего броней</div></div>'+
+    '<div class="stat"><div class="stat-n">'+gc+'</div><div class="stat-l">Женских</div></div>'+
+    '<div class="stat"><div class="stat-n">'+bc+'</div><div class="stat-l">Мужских</div></div>'+
+    '<div class="stat"><div class="stat-n">'+(total-entries.length)+'</div><div class="stat-l">Свободных</div></div>';
+  var tb = document.getElementById('adm-tbody');
+  if (!entries.length) { tb.innerHTML = '<tr><td colspan="7" class="empty-tbl">Пока нет ни одной брони</td></tr>'; return; }
+  tb.innerHTML = entries.map(function(item, i) {
+    var id = item[0]; var bk = item[1];
+    var isG = id.startsWith('g');
+    var idx = parseInt(id.split('-')[1]);
+    var data = isG ? GD : BD;
+    var cn = data[idx] ? data[idx].n : id;
+    var dt = new Date(bk.bookedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+    return '<tr>'+
+      '<td style="color:rgba(255,255,255,.35)">'+(i+1)+'</td>'+
+      '<td><strong>'+(bk.name||'')+'</strong></td>'+
+      '<td style="color:rgba(255,255,255,.7)">'+(bk.phone||'')+'</td>'+
+      '<td>'+cn+'</td>'+
+      '<td><span class="'+(isG?'bdg-g':'bdg-b')+'">'+(isG?'♀ Девушка':'♂ Парень')+'</span></td>'+
+      '<td style="color:rgba(255,255,255,.45);white-space:nowrap">'+dt+'</td>'+
+      '<td><button class="btn-adm-del" onclick="aDel(''+id+'')">Удалить</button></td>'+
+    '</tr>';
   }).join('');
 }
 
-async function aDel(id) {
-  try {
-    await apiPost('/admin/delete', { id, pwd: ADMIN_PWD });
+function aDel(id) {
+  apiPost('/admin/delete', { id: id, pwd: ADMIN_PWD }, function() {
     delete bookings[id]; delete myBookings[id];
-    render();
-    renderAdmin();
-    toast('Бронь удалена', '');
-  } catch(e) { toast('Ошибка', 'err'); }
+    render(); toast('Бронь удалена', '');
+  });
 }
 
 function exportCSV() {
-  const entries = Object.entries(bookings).sort((a,b) => new Date(a[1].bookedAt)-new Date(b[1].bookedAt));
-  const rows = [['#','Имя','Телефон','Образ','Тип','Дата и время']];
-  entries.forEach(([id, bk], i) => {
-    const isG = id.startsWith('g');
-    const idx = parseInt(id.split('-')[1]);
-    const data = isG ? GD : BD;
-    const cn = data[idx] ? data[idx].n : id;
-    rows.push([i+1, bk.name, bk.phone, cn, isG?'Девушка':'Парень', new Date(bk.bookedAt).toLocaleString('ru-RU')]);
+  fetch(API_BASE + '/admin/bookings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ pwd: ADMIN_PWD })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(fullData){
+    var entries = Object.entries(fullData).sort(function(a,b){ return new Date(a[1].bookedAt)-new Date(b[1].bookedAt); });
+    var rows = [['#','Имя','Телефон','Образ','Тип','Дата и время']];
+    entries.forEach(function(item, i) {
+      var id = item[0]; var bk = item[1];
+      var isG = id.startsWith('g');
+      var idx = parseInt(id.split('-')[1]);
+      var data = isG ? GD : BD;
+      var cn = data[idx] ? data[idx].n : id;
+      rows.push([i+1, bk.name||'', bk.phone||'', cn, isG?'Девушка':'Парень', new Date(bk.bookedAt).toLocaleString('ru-RU')]);
+    });
+    var csv = rows.map(function(r){ return r.map(function(c){ return '"'+String(c).replace(/"/g,'""')+'"'; }).join(','); }).join('\n');
+    var blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'});
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mtv_bookings.csv'; a.click();
   });
-  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mtv_bookings.csv'; a.click();
 }
 
 // ── TOAST ──────────────────────────────────────
-let tt;
+var tt;
 function toast(msg, type) {
-  const el = document.getElementById('toast');
-  el.textContent = msg; el.className = `toast ${type} show`;
-  clearTimeout(tt); tt = setTimeout(() => el.classList.remove('show'), 3200);
+  var el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'toast ' + type + ' show';
+  clearTimeout(tt); tt = setTimeout(function(){ el.classList.remove('show'); }, 3200);
 }
 
 // ── INIT ───────────────────────────────────────
-async function init() {
-  await loadBookings();
-  render();
-  document.getElementById('loader').classList.add('gone');
-  setInterval(async () => {
-    const prev = JSON.stringify(bookings);
-    await loadBookings();
-    if (JSON.stringify(bookings) !== prev) render();
-  }, 10000);
+function init() {
+  loadBookings(function() {
+    render();
+    document.getElementById('loader').classList.add('gone');
+    setInterval(function() {
+      var prev = JSON.stringify(bookings);
+      loadBookings(function() {
+        if (JSON.stringify(bookings) !== prev) render();
+      });
+    }, 10000);
+  });
 }
 init();
 </script>
