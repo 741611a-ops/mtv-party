@@ -72,6 +72,27 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (pathname === '/api/admin/bookings' && req.method === 'POST') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const { pwd } = JSON.parse(body);
+        if (pwd !== ADMIN_PWD) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'forbidden' })); return;
+        }
+        const data = loadData();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+      } catch(e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
   if (pathname === '/api/book' && req.method === 'POST') {
     let body = '';
     req.on('data', d => body += d);
@@ -87,9 +108,7 @@ const server = http.createServer((req, res) => {
         const bookedAt = new Date().toISOString();
         data[id] = { name, phone, bookedAt };
         saveData(data);
-
         const type = id.startsWith('g') ? '👗 Девушка' : '👔 Парень';
-        const idx = parseInt(id.split('-')[1]);
         sendTelegram(
           '🎤 <b>Новая бронь!</b>\n\n' +
           type + '\n' +
@@ -97,7 +116,6 @@ const server = http.createServer((req, res) => {
           '📱 Телефон: <b>' + phone + '</b>\n' +
           '🕐 Время: ' + new Date().toLocaleString('ru-RU')
         );
-
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, bookedAt }));
       } catch(e) {
