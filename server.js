@@ -108,7 +108,9 @@ const server = http.createServer((req, res) => {
         const bookedAt = new Date().toISOString();
         data[id] = { name, phone, bookedAt };
         saveData(data);
+
         const type = id.startsWith('g') ? '👗 Девушка' : '👔 Парень';
+        const idx = parseInt(id.split('-')[1]);
         sendTelegram(
           '🎤 <b>Новая бронь!</b>\n\n' +
           type + '\n' +
@@ -116,6 +118,7 @@ const server = http.createServer((req, res) => {
           '📱 Телефон: <b>' + phone + '</b>\n' +
           '🕐 Время: ' + new Date().toLocaleString('ru-RU')
         );
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, bookedAt }));
       } catch(e) {

@@ -502,8 +502,20 @@ function aLogout() {
   document.getElementById('adm-err').classList.add('hidden');
 }
 
-function renderAdmin() {
-  const entries = Object.entries(bookings).sort((a,b) => new Date(a[1].bookedAt)-new Date(b[1].bookedAt));
+async function loadAdminBookings() {
+  try {
+    const r = await fetch(API_BASE + '/admin/bookings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ pwd: ADMIN_PWD })
+    });
+    return await r.json();
+  } catch(e) { return bookings; }
+}
+
+async async function renderAdmin() {
+  const fullData = await loadAdminBookings();
+  const entries = Object.entries(fullData).sort((a,b) => new Date(a[1].bookedAt)-new Date(b[1].bookedAt));
   const gc = entries.filter(([id]) => id.startsWith('g')).length;
   const bc = entries.filter(([id]) => id.startsWith('b')).length;
   const total = GD.length + BD.length;
@@ -536,7 +548,9 @@ async function aDel(id) {
   try {
     await apiPost('/admin/delete', { id, pwd: ADMIN_PWD });
     delete bookings[id]; delete myBookings[id];
-    render(); toast('Бронь удалена', '');
+    render();
+    renderAdmin();
+    toast('Бронь удалена', '');
   } catch(e) { toast('Ошибка', 'err'); }
 }
 
