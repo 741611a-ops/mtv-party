@@ -438,6 +438,10 @@ function openM(id, name) {
 }
 
 document.addEventListener('click', function(e) {
+  if (e.target.classList.contains('btn-adm-del')) {
+    aDel(e.target.getAttribute('data-id'));
+  }
+
   if (e.target.classList.contains('btn-bk')) {
     var id = e.target.getAttribute('data-id');
     var parts = id.split('-');
@@ -541,24 +545,30 @@ function drawAdminTable(fullData) {
     '<div class="stat"><div class="stat-n">'+bc+'</div><div class="stat-l">Мужских</div></div>'+
     '<div class="stat"><div class="stat-n">'+(total-entries.length)+'</div><div class="stat-l">Свободных</div></div>';
   var tb = document.getElementById('adm-tbody');
-  if (!entries.length) { tb.innerHTML = '<tr><td colspan="7" class="empty-tbl">Пока нет ни одной брони</td></tr>'; return; }
-  tb.innerHTML = entries.map(function(item, i) {
-    var id = item[0]; var bk = item[1];
+  if (!entries.length) {
+    tb.innerHTML = '<tr><td colspan="7" class="empty-tbl">Пока нет ни одной брони</td></tr>';
+    return;
+  }
+  var rows = '';
+  for (var i = 0; i < entries.length; i++) {
+    var id = entries[i][0];
+    var bk = entries[i][1];
     var isG = id.startsWith('g');
     var idx = parseInt(id.split('-')[1]);
     var data = isG ? GD : BD;
     var cn = data[idx] ? data[idx].n : id;
-    var dt = new Date(bk.bookedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
-    return '<tr>'+
-      '<td style="color:rgba(255,255,255,.35)">'+(i+1)+'</td>'+
-      '<td><strong>'+(bk.name||'')+'</strong></td>'+
-      '<td style="color:rgba(255,255,255,.7)">'+(bk.phone||'')+'</td>'+
-      '<td>'+cn+'</td>'+
-      '<td><span class="'+(isG?'bdg-g':'bdg-b')+'">'+(isG?'♀ Девушка':'♂ Парень')+'</span></td>'+
-      '<td style="color:rgba(255,255,255,.45);white-space:nowrap">'+dt+'</td>'+
-      '<td><button class="btn-adm-del" onclick="aDel(''+id+'')">Удалить</button></td>'+
-    '</tr>';
-  }).join('');
+    var dt = new Date(bk.bookedAt).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+    rows += '<tr>';
+    rows += '<td style="color:rgba(255,255,255,.35)">'+(i+1)+'</td>';
+    rows += '<td><strong>'+(bk.name||'')+'</strong></td>';
+    rows += '<td style="color:rgba(255,255,255,.7)">'+(bk.phone||'')+'</td>';
+    rows += '<td>'+cn+'</td>';
+    rows += '<td><span class="'+(isG?'bdg-g':'bdg-b')+'">'+(isG?'♀ Девушка':'♂ Парень')+'</span></td>';
+    rows += '<td style="color:rgba(255,255,255,.45);white-space:nowrap">'+dt+'</td>';
+    rows += '<td><button class="btn-adm-del" data-id="'+id+'">Удалить</button></td>';
+    rows += '</tr>';
+  }
+  tb.innerHTML = rows;
 }
 
 function aDel(id) {
