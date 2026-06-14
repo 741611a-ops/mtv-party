@@ -386,19 +386,24 @@ function cardHTML(d, type, i) {
   var bk = bookings[id];
   var mine = !!myBookings[id];
   var cls = 'card ' + (type==='g'?'g':'b') + (bk?' bkd':'') + (mine?' mine':'');
-  return '<div class="'+cls+'" id="card-'+id+'">'+
-    '<div class="badge-mine">МОЙ ОБРАЗ ✓</div>'+
-    '<div class="badge-bkd">ЗАБРОНИРОВАНО</div>'+
-    '<div class="c-num">'+(type==='g'?'♀':'♂')+' '+String(i+1).padStart(2,'0')+'</div>'+
-    '<div class="c-name">'+d.n+'</div>'+
-    '<div class="c-era">'+d.e+'</div>'+
-    '<div class="c-look">'+d.l+'</div>'+
-    '<div class="c-tags">'+d.t.map(function(x){return '<span class="tag">'+x+'</span>';}).join('')+'</div>'+
-    '<div class="c-diff">'+d.d+' сложность</div>'+
-    '<div class="c-tip">'+d.tip+'</div>'+
-    (!bk ? '<button class="btn-bk" onclick="openM(''+id+'',''+d.n.replace(/'/g,"\'")+'')" >Забронировать образ</button>' : '')+
-    (mine ? '<button class="btn-cncl" onclick="cancelBook(''+id+'')">Отменить мою бронь</button>' : '')+
-  '</div>';
+  var html = '<div class="'+cls+'" id="card-'+id+'">';
+  html += '<div class="badge-mine">МОЙ ОБРАЗ ✓</div>';
+  html += '<div class="badge-bkd">ЗАБРОНИРОВАНО</div>';
+  html += '<div class="c-num">'+(type==='g'?'♀':'♂')+' '+String(i+1).padStart(2,'0')+'</div>';
+  html += '<div class="c-name">'+d.n+'</div>';
+  html += '<div class="c-era">'+d.e+'</div>';
+  html += '<div class="c-look">'+d.l+'</div>';
+  html += '<div class="c-tags">'+d.t.map(function(x){return '<span class="tag">'+x+'</span>';}).join('')+'</div>';
+  html += '<div class="c-diff">'+d.d+' сложность</div>';
+  html += '<div class="c-tip">'+d.tip+'</div>';
+  if (!bk) {
+    html += '<button class="btn-bk" data-id="'+id+'">Забронировать образ</button>';
+  }
+  if (mine) {
+    html += '<button class="btn-cncl" data-id="'+id+'">Отменить мою бронь</button>';
+  }
+  html += '</div>';
+  return html;
 }
 
 function updateCounts() {
@@ -431,6 +436,20 @@ function openM(id, name) {
   document.getElementById('modal').classList.add('open');
   setTimeout(function(){ document.getElementById('inp-name').focus(); }, 150);
 }
+
+document.addEventListener('click', function(e) {
+  if (e.target.classList.contains('btn-bk')) {
+    var id = e.target.getAttribute('data-id');
+    var parts = id.split('-');
+    var type = parts[0];
+    var idx = parseInt(parts[1]);
+    var name = type === 'g' ? GD[idx].n : BD[idx].n;
+    openM(id, name);
+  }
+  if (e.target.classList.contains('btn-cncl')) {
+    cancelBook(e.target.getAttribute('data-id'));
+  }
+});
 
 document.getElementById('btn-cls').onclick = function() {
   document.getElementById('modal').classList.remove('open');
