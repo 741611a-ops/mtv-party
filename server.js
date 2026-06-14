@@ -1,27 +1,15 @@
-[build]
-builder = "NIXPACKS"
-
-[deploy]
-startCommand = "node server.js"
-restartPolicyType = "ON_FAILURE"
-
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
 
-// ══════════════════════════════════════════
-//  НАСТРОЙКИ — берутся из переменных Railway
-// ══════════════════════════════════════════
-const BOT_TOKEN   = process.env.BOT_TOKEN   || '';
-const ADMIN_CHAT  = process.env.ADMIN_CHAT  || '';
-const ADMIN_PWD   = process.env.ADMIN_PWD   || 'mtv2025admin';
-const PORT        = process.env.PORT        || 3000;
-const DATA_FILE   = path.join(__dirname, 'bookings.json');
-// ══════════════════════════════════════════
+const BOT_TOKEN  = process.env.BOT_TOKEN  || '';
+const ADMIN_CHAT = process.env.ADMIN_CHAT || '';
+const ADMIN_PWD  = process.env.ADMIN_PWD  || 'mtv2025admin';
+const PORT       = process.env.PORT       || 3000;
+const DATA_FILE  = path.join(__dirname, 'bookings.json');
 
-// Хранилище броней
 function loadData() {
   try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); }
   catch { return {}; }
@@ -30,7 +18,6 @@ function saveData(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-// Отправка сообщения в Telegram
 function sendTelegram(text) {
   if (!BOT_TOKEN) { console.log('[TG] BOT_TOKEN не задан'); return; }
   if (!ADMIN_CHAT) { console.log('[TG] ADMIN_CHAT не задан'); return; }
@@ -45,12 +32,11 @@ function sendTelegram(text) {
     let data = '';
     res.on('data', chunk => data += chunk);
     res.on('end', () => {
-      const parsed = JSON.parse(data);
-      if (parsed.ok) {
-        console.log('[TG] Успешно отправлено!');
-      } else {
-        console.error('[TG] Ошибка:', parsed.description);
-      }
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed.ok) { console.log('[TG] Успешно отправлено!'); }
+        else { console.error('[TG] Ошибка:', parsed.description); }
+      } catch(e) { console.error('[TG] Ошибка парсинга:', data); }
     });
   });
   req.on('error', (e) => console.error('[TG] Сетевая ошибка:', e.message));
@@ -58,7 +44,6 @@ function sendTelegram(text) {
   req.end();
 }
 
-// Mime types
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js':   'application/javascript',
@@ -71,19 +56,16 @@ const server = http.createServer((req, res) => {
   const parsed = url.parse(req.url, true);
   const pathname = parsed.pathname;
 
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
-  // ── API ──────────────────────────────────
   if (pathname === '/api/bookings' && req.method === 'GET') {
     const data = loadData();
-    // Return only booked IDs (no names/phones for guests)
     const publicData = {};
     for (const [k, v] of Object.entries(data)) {
-      publicData[k] = { bookedAt: v.bookedAt }; // hide name/phone
+      publicData[k] = { bookedAt: v.bookedAt };
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(publicData));
@@ -106,15 +88,14 @@ const server = http.createServer((req, res) => {
         data[id] = { name, phone, bookedAt };
         saveData(data);
 
-        // Telegram notification
         const type = id.startsWith('g') ? '👗 Девушка' : '👔 Парень';
+        const idx = parseInt(id.split('-')[1]);
         sendTelegram(
-          `🎤 <b>Новая бронь!</b>\n\n` +
-          `${type}\n` +
-          `🎭 Образ: <b>${id}</b>\n` +
-          `👤 Имя: <b>${name}</b>\n` +
-          `📱 Телефон: <b>${phone}</b>\n` +
-          `🕐 Время: ${new Date().toLocaleString('ru-RU')}`
+          '🎤 <b>Новая бронь!</b>\n\n' +
+          type + '\n' +
+          '👤 Имя: <b>' + name + '</b>\n' +
+          '📱 Телефон: <b>' + phone + '</b>\n' +
+          '🕐 Время: ' + new Date().toLocaleString('ru-RU')
         );
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -131,12 +112,17 @@ const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', d => body += d);
     req.on('end', () => {
-      const { id } = JSON.parse(body);
-      const data = loadData();
-      delete data[id];
-      saveData(data);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
+      try {
+        const { id } = JSON.parse(body);
+        const data = loadData();
+        delete data[id];
+        saveData(data);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch(e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
     });
     return;
   }
@@ -145,24 +131,28 @@ const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', d => body += d);
     req.on('end', () => {
-      const { id, pwd } = JSON.parse(body);
-      if (pwd !== ADMIN_PWD) {
-        res.writeHead(403, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'forbidden' })); return;
+      try {
+        const { id, pwd } = JSON.parse(body);
+        if (pwd !== ADMIN_PWD) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'forbidden' })); return;
+        }
+        const data = loadData();
+        delete data[id];
+        saveData(data);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch(e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
       }
-      const data = loadData();
-      delete data[id];
-      saveData(data);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
     });
     return;
   }
 
-  // ── STATIC FILES ─────────────────────────
   let filePath = path.join(__dirname, pathname === '/' ? 'index.html' : pathname);
   const ext = path.extname(filePath);
-  if (!ext) filePath = path.join(__dirname, 'index.html'); // SPA fallback
+  if (!ext) filePath = path.join(__dirname, 'index.html');
 
   fs.readFile(filePath, (err, content) => {
     if (err) {
@@ -178,591 +168,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`\n🎤 MTV 2000s Party сервер запущен на порту ${PORT}`);
-  console.log(`   Открой: http://localhost:${PORT}`);
-  if (BOT_TOKEN.includes('ВСТАВЬ')) {
-    console.log('\n⚠️  Не забудь вставить BOT_TOKEN и ADMIN_CHAT в server.js!');
-  }
+  console.log('MTV 2000s Party запущен на порту ' + PORT);
+  console.log('BOT_TOKEN задан: ' + (BOT_TOKEN ? 'ДА' : 'НЕТ'));
+  console.log('ADMIN_CHAT задан: ' + (ADMIN_CHAT ? 'ДА' : 'НЕТ'));
 });
-
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>MTV 2000s Party 🎤</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Inter:wght@400;600;700&display=swap');
-  :root{--pink:#FF1F8E;--blue:#00CFFF;--gold:#FFD700;--dark:#0D0015;--card-bg:rgba(255,255,255,0.04);}
-  *{box-sizing:border-box;margin:0;padding:0;}
-  html,body{height:100%;}
-  body{background:var(--dark);color:#fff;font-family:'Inter',sans-serif;min-height:100vh;overflow-x:hidden;}
-  body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse at 20% 20%,rgba(255,31,142,.18) 0%,transparent 55%),radial-gradient(ellipse at 80% 80%,rgba(0,207,255,.15) 0%,transparent 55%);pointer-events:none;z-index:0;}
-  .wrap{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 20px 60px;}
-  .hero{text-align:center;padding:48px 20px 36px;}
-  .hero-lbl{font-size:12px;letter-spacing:5px;text-transform:uppercase;color:var(--blue);margin-bottom:12px;font-weight:600;}
-  .hero-ttl{font-family:'Black Han Sans',sans-serif;font-size:clamp(42px,10vw,88px);line-height:.95;background:linear-gradient(135deg,var(--pink),var(--blue),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:8px;}
-  .hero-sub{font-size:16px;color:rgba(255,255,255,.55);letter-spacing:2px;text-transform:uppercase;}
-  .sg{background:linear-gradient(135deg,rgba(255,31,142,.12),rgba(0,207,255,.08));border:1px solid rgba(255,31,142,.3);border-radius:20px;padding:36px;margin:0 0 48px;}
-  .sg h2{font-family:'Black Han Sans',sans-serif;font-size:28px;color:var(--gold);margin-bottom:24px;letter-spacing:2px;}
-  .rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;}
-  .rule{background:rgba(255,255,255,.05);border-radius:12px;padding:16px;border-left:3px solid var(--pink);}
-  .rule-i{font-size:22px;margin-bottom:6px;}.rule-t{font-size:12px;font-weight:700;color:var(--pink);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;}.rule-d{font-size:13px;color:rgba(255,255,255,.7);line-height:1.5;}
-  .vibes{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px;}
-  .vibe{background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.4);color:var(--gold);padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;}
-  .tabs{display:flex;gap:4px;margin-bottom:28px;background:rgba(255,255,255,.04);padding:4px;border-radius:12px;width:fit-content;flex-wrap:wrap;}
-  .tab{padding:10px 24px;border-radius:9px;border:none;cursor:pointer;font-family:'Inter',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;transition:all .2s;background:transparent;color:rgba(255,255,255,.5);}
-  .tab.ag{background:linear-gradient(135deg,var(--pink),#a0008e);color:#fff;box-shadow:0 0 20px rgba(255,31,142,.5);}
-  .tab.ab{background:linear-gradient(135deg,var(--blue),#0050a0);color:#fff;box-shadow:0 0 20px rgba(0,207,255,.4);}
-  .tab.aa{background:linear-gradient(135deg,var(--gold),#b8860b);color:#000;box-shadow:0 0 20px rgba(255,215,0,.4);}
-  .sec-hdr{display:flex;align-items:center;gap:16px;margin-bottom:24px;}
-  .sec-num{font-family:'Black Han Sans',sans-serif;font-size:48px;opacity:.15;line-height:1;}
-  .sec-inf h3{font-size:22px;font-weight:700;}.sec-inf p{font-size:13px;color:rgba(255,255,255,.5);margin-top:2px;}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;}
-  .card{background:var(--card-bg);border-radius:16px;padding:20px;border:1px solid rgba(255,255,255,.08);transition:transform .2s,box-shadow .2s,border-color .2s;position:relative;overflow:hidden;}
-  .card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
-  .card.g::before{background:linear-gradient(90deg,var(--pink),#ff9de2);}
-  .card.b::before{background:linear-gradient(90deg,var(--blue),#9de2ff);}
-  .card:not(.bkd):hover{transform:translateY(-4px);}
-  .card.g:not(.bkd):hover{box-shadow:0 12px 40px rgba(255,31,142,.25);border-color:rgba(255,31,142,.35);}
-  .card.b:not(.bkd):hover{box-shadow:0 12px 40px rgba(0,207,255,.2);border-color:rgba(0,207,255,.3);}
-  .card.bkd{opacity:.55;cursor:not-allowed;}
-  .card.bkd::after{content:'';position:absolute;inset:0;background:rgba(0,0,0,.4);border-radius:16px;pointer-events:none;}
-  .badge-bkd{display:none;position:absolute;top:12px;right:12px;background:rgba(220,50,50,.95);color:#fff;font-size:10px;font-weight:700;padding:4px 10px;border-radius:20px;letter-spacing:1px;text-transform:uppercase;z-index:2;}
-  .card.bkd .badge-bkd{display:block;}
-  .badge-mine{display:none;position:absolute;top:12px;left:12px;background:var(--gold);color:#000;font-size:10px;font-weight:700;padding:4px 10px;border-radius:20px;letter-spacing:1px;text-transform:uppercase;z-index:3;}
-  .card.mine .badge-mine{display:block;}
-  .card.mine{opacity:1!important;cursor:default!important;}
-  .card.mine::after{display:none!important;}
-  .c-num{font-size:11px;letter-spacing:2px;margin-bottom:8px;opacity:.4;}
-  .c-name{font-size:15px;font-weight:700;margin-bottom:4px;line-height:1.2;}
-  .card.g .c-name{color:#ff9de2;}.card.b .c-name{color:#9de2ff;}
-  .c-era{font-size:11px;color:rgba(255,255,255,.35);margin-bottom:12px;font-style:italic;}
-  .c-look{font-size:13px;color:rgba(255,255,255,.85);line-height:1.6;margin-bottom:12px;}
-  .c-tags{display:flex;flex-wrap:wrap;gap:6px;}
-  .tag{font-size:10px;padding:3px 9px;border-radius:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;}
-  .card.g .tag{background:rgba(255,31,142,.15);color:#ff9de2;border:1px solid rgba(255,31,142,.25);}
-  .card.b .tag{background:rgba(0,207,255,.12);color:#9de2ff;border:1px solid rgba(0,207,255,.2);}
-  .c-tip{margin-top:12px;padding:10px 12px;border-radius:8px;font-size:12px;line-height:1.5;font-style:italic;}
-  .card.g .c-tip{background:rgba(255,31,142,.08);color:rgba(255,200,220,.8);}
-  .card.b .c-tip{background:rgba(0,207,255,.07);color:rgba(180,230,255,.8);}
-  .c-diff{font-size:11px;color:rgba(255,215,0,.6);margin-top:8px;letter-spacing:1px;}
-  .btn-bk{margin-top:14px;width:100%;padding:12px;border:none;border-radius:10px;font-family:'Inter',sans-serif;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .2s;position:relative;z-index:2;}
-  .card.g .btn-bk{background:linear-gradient(135deg,var(--pink),#a0008e);color:#fff;}
-  .card.g .btn-bk:hover{box-shadow:0 4px 20px rgba(255,31,142,.5);}
-  .card.b .btn-bk{background:linear-gradient(135deg,var(--blue),#0050a0);color:#fff;}
-  .card.b .btn-bk:hover{box-shadow:0 4px 20px rgba(0,207,255,.4);}
-  .card.bkd .btn-bk,.card.mine .btn-bk{display:none;}
-  .btn-cncl{display:none;margin-top:10px;width:100%;padding:9px;border:1px solid rgba(255,100,100,.4);border-radius:10px;background:rgba(255,60,60,.1);color:rgba(255,160,160,.9);font-family:'Inter',sans-serif;font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .2s;position:relative;z-index:3;}
-  .card.mine .btn-cncl{display:block;}
-  .btn-cncl:hover{background:rgba(255,60,60,.25);}
-  /* MODAL */
-  .modal-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);z-index:100;align-items:center;justify-content:center;padding:20px;}
-  .modal-ov.open{display:flex;}
-  .modal{background:#13002a;border:1px solid rgba(255,31,142,.3);border-radius:20px;padding:32px;max-width:420px;width:100%;box-shadow:0 0 80px rgba(255,31,142,.2);}
-  .modal h3{font-family:'Black Han Sans',sans-serif;font-size:22px;color:var(--gold);margin-bottom:6px;}
-  .modal-sub{font-size:13px;color:rgba(255,255,255,.45);margin-bottom:24px;line-height:1.5;}
-  .m-field{margin-bottom:16px;}
-  .m-field label{display:block;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.5);margin-bottom:6px;}
-  .m-field input{width:100%;padding:13px 14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:10px;color:#fff;font-size:16px;font-family:'Inter',sans-serif;outline:none;transition:border-color .2s;-webkit-appearance:none;}
-  .m-field input:focus{border-color:var(--pink);}
-  .m-field input::placeholder{color:rgba(255,255,255,.25);}
-  .m-err{font-size:12px;color:#ff6060;margin-top:6px;display:none;}
-  .m-btns{display:flex;gap:10px;margin-top:24px;}
-  .btn-ok{flex:1;padding:14px;background:linear-gradient(135deg,var(--pink),#a0008e);border:none;border-radius:10px;color:#fff;font-family:'Inter',sans-serif;font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .2s;}
-  .btn-ok:hover{box-shadow:0 4px 20px rgba(255,31,142,.5);}
-  .btn-ok:disabled{opacity:.5;cursor:not-allowed;}
-  .btn-cls{padding:14px 20px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:10px;color:rgba(255,255,255,.6);font-family:'Inter',sans-serif;font-size:14px;font-weight:600;cursor:pointer;}
-  /* ADMIN */
-  .adm-login{max-width:380px;margin:0 auto;text-align:center;padding:40px 0;}
-  .adm-login h3{font-family:'Black Han Sans',sans-serif;font-size:24px;color:var(--gold);margin-bottom:8px;}
-  .adm-login p{color:rgba(255,255,255,.4);font-size:13px;margin-bottom:28px;}
-  .adm-inp{width:100%;padding:13px 16px;margin-bottom:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,215,0,.2);border-radius:10px;color:#fff;font-size:15px;font-family:'Inter',sans-serif;outline:none;-webkit-appearance:none;}
-  .adm-inp:focus{border-color:var(--gold);}
-  .btn-adm-login{width:100%;padding:13px;background:linear-gradient(135deg,var(--gold),#b8860b);border:none;border-radius:10px;color:#000;font-family:'Inter',sans-serif;font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;}
-  .adm-err{color:#ff6060;font-size:12px;margin-top:8px;}
-  .adm-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px;}
-  .adm-head h3{font-family:'Black Han Sans',sans-serif;font-size:24px;color:var(--gold);}
-  .adm-stats{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px;}
-  .stat{background:rgba(255,215,0,.08);border:1px solid rgba(255,215,0,.2);border-radius:12px;padding:16px 24px;text-align:center;}
-  .stat-n{font-family:'Black Han Sans',sans-serif;font-size:32px;color:var(--gold);}
-  .stat-l{font-size:11px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;margin-top:2px;}
-  .tbl-wrap{overflow-x:auto;border-radius:12px;border:1px solid rgba(255,215,0,.15);}
-  table{width:100%;border-collapse:collapse;font-size:13px;}
-  thead{background:rgba(255,215,0,.1);}
-  th{padding:12px 16px;text-align:left;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--gold);white-space:nowrap;}
-  td{padding:12px 16px;border-top:1px solid rgba(255,255,255,.05);vertical-align:top;}
-  tr:hover td{background:rgba(255,255,255,.03);}
-  .bdg-g{background:rgba(255,31,142,.15);color:#ff9de2;border:1px solid rgba(255,31,142,.3);padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700;white-space:nowrap;}
-  .bdg-b{background:rgba(0,207,255,.12);color:#9de2ff;border:1px solid rgba(0,207,255,.25);padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700;white-space:nowrap;}
-  .btn-adm-del{padding:4px 10px;background:rgba(255,60,60,.15);border:1px solid rgba(255,60,60,.3);border-radius:6px;color:#ff9090;font-size:11px;cursor:pointer;font-weight:600;}
-  .btn-adm-del:hover{background:rgba(255,60,60,.3);}
-  .btn-exp,.btn-out{padding:9px 16px;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.3);border-radius:8px;color:var(--gold);font-size:12px;font-weight:700;cursor:pointer;}
-  .btn-out{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.15);color:rgba(255,255,255,.5);}
-  .empty-tbl{text-align:center;padding:48px;color:rgba(255,255,255,.25);font-size:14px;}
-  /* LOADER */
-  .loader{position:fixed;inset:0;background:var(--dark);z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;}
-  .loader.gone{display:none;}
-  .dots{display:flex;gap:8px;}
-  .dot{width:10px;height:10px;border-radius:50%;display:inline-block;animation:bou .8s infinite alternate;}
-  .dot:nth-child(1){background:var(--pink);}.dot:nth-child(2){background:var(--blue);animation-delay:.2s;}.dot:nth-child(3){background:var(--gold);animation-delay:.4s;}
-  .loader-txt{font-size:13px;color:rgba(255,255,255,.4);letter-spacing:2px;text-transform:uppercase;}
-  @keyframes bou{from{transform:translateY(0)}to{transform:translateY(-14px)}}
-  /* TOAST */
-  .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a002e;border:1px solid rgba(255,31,142,.4);color:#fff;padding:13px 22px;border-radius:12px;font-size:14px;font-weight:600;z-index:300;transition:transform .3s;white-space:nowrap;box-shadow:0 8px 32px rgba(0,0,0,.4);}
-  .toast.show{transform:translateX(-50%) translateY(0);}
-  .toast.ok{border-color:rgba(57,255,20,.5);}.toast.err{border-color:rgba(255,60,60,.5);}
-  .hidden{display:none;}
-  .footer{text-align:center;margin-top:60px;padding-top:32px;border-top:1px solid rgba(255,255,255,.06);color:rgba(255,255,255,.25);font-size:12px;letter-spacing:2px;text-transform:uppercase;}
-  @media(max-width:600px){.rules{grid-template-columns:1fr 1fr;}.grid{grid-template-columns:1fr;}.sg{padding:20px;}.hero-ttl{font-size:clamp(36px,15vw,72px);}.tabs{width:100%;}.tab{flex:1;padding:10px 8px;font-size:11px;}}
-</style>
-</head>
-<body>
-<div class="loader" id="loader">
-  <div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
-  <div class="loader-txt">Загрузка образов...</div>
-</div>
-<div class="toast" id="toast"></div>
-
-<!-- MODAL -->
-<div class="modal-ov" id="modal">
-  <div class="modal">
-    <h3>🎤 Бронирование</h3>
-    <div class="modal-sub" id="m-card">Введи своё имя и номер WhatsApp</div>
-    <div class="m-field">
-      <label>Твоё имя</label>
-      <input type="text" id="inp-name" placeholder="Например: Алия" maxlength="50" autocomplete="name">
-      <div class="m-err" id="err-name">Введи имя</div>
-    </div>
-    <div class="m-field">
-      <label>Телефон (WhatsApp)</label>
-      <input type="tel" id="inp-phone" placeholder="+7 777 000 00 00" maxlength="20" autocomplete="tel">
-      <div class="m-err" id="err-phone">Введи номер телефона</div>
-    </div>
-    <div class="m-btns">
-      <button class="btn-ok" id="btn-ok">Забронировать ✓</button>
-      <button class="btn-cls" id="btn-cls">Отмена</button>
-    </div>
-  </div>
-</div>
-
-<div class="wrap">
-  <div class="hero">
-    <div class="hero-lbl">Dress Code Guide</div>
-    <div class="hero-ttl">MTV<br>2000s</div>
-    <div class="hero-sub" id="hero-sub">Загрузка...</div>
-  </div>
-  <div class="sg">
-    <h2>✦ ОБЩИЙ КОД СТИЛЯ</h2>
-    <div class="rules">
-      <div class="rule"><div class="rule-i">👖</div><div class="rule-t">Низкая талия</div><div class="rule-d">Брюки, юбки и шорты сидят НА бёдрах. Живот всегда открыт — это закон декады.</div></div>
-      <div class="rule"><div class="rule-i">✨</div><div class="rule-t">Блеск и глиттер</div><div class="rule-d">Пайетки, стразы, голографические ткани, металлик — чем больше блеска, тем лучше.</div></div>
-      <div class="rule"><div class="rule-i">👗</div><div class="rule-t">Кожа и кружево</div><div class="rule-d">Искусственная кожа, прозрачные вставки, кружево поверх белья — это 2000-е.</div></div>
-      <div class="rule"><div class="rule-i">💄</div><div class="rule-t">Мэйкап</div><div class="rule-d">Глаза: стрелки, смоки или тёмные тени. Губы: либо глянцевый нюд, либо яркая помада.</div></div>
-      <div class="rule"><div class="rule-i">💇</div><div class="rule-t">Волосы</div><div class="rule-d">Плоский айрон + супергладкие пряди, или локоны с лаком. Косички, дреды, пучки — всё идёт.</div></div>
-      <div class="rule"><div class="rule-i">💍</div><div class="rule-t">Аксессуары</div><div class="rule-d">Огромные серьги-хупы, цепи, браслеты поверх рукавов, поясные сумки, очки-бабочки.</div></div>
-      <div class="rule"><div class="rule-i">👟</div><div class="rule-t">Обувь</div><div class="rule-d">Платформа, шпильки, кроссовки-дутыши, ботфорты — только не флэт без характера.</div></div>
-      <div class="rule"><div class="rule-i">🎨</div><div class="rule-t">Цвета</div><div class="rule-d">Кислотные неоны, чистый белый, весь чёрный, камуфляж, кислотный розовый + денимовый синий.</div></div>
-    </div>
-    <div class="vibes"><span class="vibe">⚡ Дерзко</span><span class="vibe">💋 Сексуально</span><span class="vibe">✨ Гламурно</span><span class="vibe">🔥 Провокационно</span><span class="vibe">🎤 Поп-иконично</span><span class="vibe">🌀 Y2K</span><span class="vibe">🖤 Rockstar</span><span class="vibe">💛 Bling-bling</span></div>
-  </div>
-  <div class="tabs">
-    <button class="tab ag" id="t-g" onclick="show('g',this)">💋 Девушки (<span id="cnt-g">…</span>)</button>
-    <button class="tab" id="t-b" onclick="show('b',this)">🔥 Парни (<span id="cnt-b">…</span>)</button>
-    <button class="tab" id="t-a" onclick="show('a',this)">🔐 Организатор</button>
-  </div>
-  <div id="sec-g">
-    <div class="sec-hdr"><div class="sec-num" style="color:var(--pink)" id="num-g">…</div><div class="sec-inf"><h3 style="color:var(--pink)">Образы для девушек</h3><p>Нажми «Забронировать» — образ закрепится за тобой</p></div></div>
-    <div class="grid" id="grid-g"></div>
-  </div>
-  <div id="sec-b" class="hidden">
-    <div class="sec-hdr"><div class="sec-num" style="color:var(--blue)" id="num-b">…</div><div class="sec-inf"><h3 style="color:var(--blue)">Образы для парней</h3><p>Нажми «Забронировать» — образ закрепится за тобой</p></div></div>
-    <div class="grid" id="grid-b"></div>
-  </div>
-  <div id="sec-a" class="hidden">
-    <div id="adm-login" class="adm-login">
-      <h3>🔐 Организатор</h3>
-      <p>Только организатор имеет доступ к этому разделу</p>
-      <input type="password" class="adm-inp" id="adm-pwd" placeholder="Пароль" onkeydown="if(event.key==='Enter')aLogin()">
-      <button class="btn-adm-login" onclick="aLogin()">Войти</button>
-      <div class="adm-err hidden" id="adm-err">Неверный пароль</div>
-    </div>
-    <div id="adm-panel" class="hidden">
-      <div class="adm-head">
-        <h3>📋 Бронирования</h3>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;">
-          <button class="btn-exp" onclick="exportCSV()">⬇ CSV</button>
-          <button class="btn-out" onclick="aLogout()">Выйти</button>
-        </div>
-      </div>
-      <div class="adm-stats" id="adm-stats"></div>
-      <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Имя</th><th>Телефон</th><th>Образ</th><th>Тип</th><th>Время</th><th></th></tr></thead><tbody id="adm-tbody"></tbody></table></div>
-    </div>
-  </div>
-  <div class="footer">MTV 2000s Party · Dress Code · Бронирование образов</div>
-</div>
-
-<script>
-// ══════════════════════════════════════════════
-//  НАСТРОЙКИ — заменить перед деплоем
-// ══════════════════════════════════════════════
-const ADMIN_PWD = 'mtv2025admin'; // пароль организатора
-const API_BASE  = '/api';         // путь к серверу (не менять)
-// ══════════════════════════════════════════════
-
-// Инициализация Telegram Web App
-const tg = window.Telegram?.WebApp;
-if (tg) { tg.ready(); tg.expand(); }
-
-// ── ДАННЫЕ ОБРАЗОВ ────────────────────────────
-const GD=[
-  {n:"Бритни Спирс",e:"Pop Princess · USA",l:"Джинсовый кроп-топ + джинсовое мини (VMAs 2001) ИЛИ телесный боди в стразах — Toxic. Волосы: волны или платиновые локоны.",t:["деним","стразы","pop icon"],d:"⭐⭐",tip:"💡 Зеркальные украшения + низкая посадка — главные детали."},
-  {n:"Бейонсé",e:"R&B Goddess · USA",l:"Денимный кроп-корсет + низкие джинсовые шорты (Crazy in Love) ИЛИ золотое платье с вырезами. Пышные кудри, огромные хупы.",t:["корсет","золото","R&B diva"],d:"⭐⭐",tip:"💡 Бронзовый контур + нюдовая помада. Уверенная походка — главное."},
-  {n:"Дженнифер Лопес",e:"Latin Bombshell · USA",l:"Платье с глубоким вырезом до пупа (Versace-вайб) или Juicy Couture + крупное золото. Тёмные волосы гладко убраны, огромные серьги-хупы.",t:["декольте","juicy","gold"],d:"⭐",tip:"💡 Бронзовый конкур + красная помада = J.Lo mode on."},
-  {n:"Кристина Агилера",e:"Xtina Danger · USA",l:"Кожаные шорты-чапсы + лифчик с бахромой (Dirrty) ИЛИ белый корсет + широкие белые брюки (Beautiful). Платиновые дреды или сверхгладкие волосы.",t:["кожа","rockstar","platinum"],d:"⭐⭐",tip:"💡 Дерзкая Dirrty или богиня Beautiful — выбор по настроению."},
-  {n:"Шакира",e:"Latin Flame · Colombia",l:"Открытый живот всегда. Расклешённые брюки с бахромой или юбка с монетками ИЛИ кожаные штаны + длинные блондинистые локоны.",t:["живот","бахрома","latina"],d:"⭐",tip:"💡 Золотой пояс с монетами — главный аксессуар."},
-  {n:"Кайли Миноуг",e:"Pop Royalty · Australia",l:"Золотые горячие шорты + корсет с перьями (Showgirl) ИЛИ белоснежный топ с V-вырезом + белые брюки клёш.",t:["золото","перья","showgirl"],d:"⭐",tip:"💡 «Дискотека встречает подиум» — образ требует каблуков."},
-  {n:"Мэрайя Кэри",e:"Diva Supreme · USA",l:"Блестящее мини-платье со стразами, максимально облегающее. Глубокое декольте, разрез до бедра. Пышные локоны.",t:["мини","стразы","diva"],d:"⭐⭐",tip:"💡 Diamanté серьги + блестящее платье + шпильки = diva moment."},
-  {n:"Мадонна",e:"Material Girl · USA",l:"Чёрный латексный корсет + кожаные брюки или мини-юбка. Красная нить на запястье. Прямые волосы, подчёркнутые скулы, красная помада.",t:["латекс","корсет","iconic"],d:"⭐⭐⭐",tip:"💡 Агрессивный красный — в помаде, в деталях, в образе."},
-  {n:"Аврил Лавин",e:"Skate Queen · Canada",l:"Галстук поверх майки или клетчатая юбка-мини + рваные колготки + тяжёлые ботинки. Чёрные перчатки без пальцев, браслеты.",t:["pop-punk","галстук","skate"],d:"⭐",tip:"💡 Хаотичные браслеты + зачёркнутые глаза карандашом = Аврил 100%."},
-  {n:"Бьорк",e:"Avant-Garde · Iceland",l:"Белое платье-лебедь с крыльями-рукавами (VMAs 2001). Нестандартный художественный грим.",t:["авангард","swan","art"],d:"⭐⭐⭐",tip:"💡 Один этот образ принесёт победу в номинации «Лучший образ вечера»."},
-  {n:"Виктория Бекхэм",e:"Posh Spice · UK",l:"Идеальное чёрное мини-платье или кожаная юбка-карандаш + каблуки-шпильки. Гладкие прямые волосы до плеч, холодный макияж.",t:["posh","минимализм","кожа"],d:"⭐",tip:"💡 Холодный нюд + брови дугой + недоступный взгляд = Posh Spice."},
-  {n:"Анастейша",e:"Power Voice · USA",l:"Рваные джинсы с низкой посадкой + белый кроп-топ. Крупные солнечные очки — обязательно. Тёмная обводка глаз, пышные растрёпанные волосы.",t:["джинсы","кроп","big glasses"],d:"⭐⭐",tip:"💡 Её фишка — огромные очки. Без них образ неполный."},
-  {n:"Алиша Кис",e:"Neo-Soul · USA",l:"Джинсовая куртка поверх белого топа + низкие джинсы + цепочки с кулонами. Естественные кудри, минимальный макияж.",t:["деним","natural","neo-soul"],d:"⭐",tip:"💡 Natural beauty + цепочки + кеды — органичный образ."},
-  {n:"Джанет Джексон",e:"R&B Diva · USA",l:"Чёрный кожаный кроп-топ + высокие кожаные брюки с молниями. Резкая бахрома, агрессивный eye-liner, гладкие прямые волосы.",t:["кожа","R&B","fierce"],d:"⭐⭐",tip:"💡 Кожа + минимум лица + максимум уверенности = Janet power."},
-  {n:"Лил Ким",e:"Rap Icon · USA",l:"Один открытый бюст: монокини с фиолетовыми пайетками или мини цвета фуксия. Яркий парик (лиловый, розовый), агрессивный грим.",t:["монокини","парик","rap queen"],d:"⭐⭐⭐",tip:"💡 Самый смелый образ для самой смелой гостьи вечера."},
-  {n:"Ферги (Black Eyed Peas)",e:"Pop Hip-Hop · USA",l:"Кожаные брюки с молниями + кроп-корсет или облегающее мини со стразами. Пышный хвост. Туфли на платформе.",t:["кожа","хип-хоп","молнии"],d:"⭐⭐",tip:"💡 Цепочки + платформа + агрессивный smoky — Ферги-образ готов."},
-  {n:"Пинк",e:"Rock-Pop · USA",l:"Кожаная мини-юбка + кроп с принтом. Платиновые рваные волосы (ирокез). Яркий агрессивный eye-liner, тёмная помада.",t:["платинум","кожаная юбка","rock rebel"],d:"⭐⭐",tip:"💡 Образ для девушки с характером — никакой мягкости."},
-  {n:"Риана",e:"Caribbean Pop · Barbados",l:"Яркое мини-платье в тропических цветах или облегающий денимный образ с открытым животом. Локоны, большие серьги-хупы.",t:["тропики","мини","caribbean"],d:"⭐⭐",tip:"💡 Молодая Рианна — свежесть + яркость. Каблуки-гвоздики обязательны."},
-  {n:"Мисси Эллиотт",e:"Hip-Hop Pioneer · USA",l:"Надувной чёрный комбинезон или oversized кожаная куртка + кепка козырьком назад. Кроссовки.",t:["oversized","streetwear","pioneer"],d:"⭐⭐⭐",tip:"💡 Культовый образ Supa Dupa Fly — для самой оригинальной."},
-  {n:"Мэри Джей Блайдж",e:"R&B Queen · USA",l:"Облегающее платье с ярким принтом + мех или перья по краю. Крупные стразы, тёмные очки, шуба поверх.",t:["мех","стразы","R&B queen"],d:"⭐⭐",tip:"💡 Шуба поверх мини = bling-bling at its finest."},
-  {n:"Глюкоза",e:"Ру-Поп Готика · Россия",l:"Белое асимметричное мини-платье + чёрная фата (Невеста). Куклоподобный грим: огромные глаза, бледная кожа, синяя чёлка.",t:["белое","готика","кукла"],d:"⭐⭐",tip:"💡 Синяя чёлка — финальный и обязательный штрих образа Глюкозы."},
-  {n:"Максим",e:"Русский Поп · Россия",l:"Чёрное облегающее мини-платье с V-образным вырезом. Прямая тёмная чёлка. Красная помада, классический smoky, каблуки.",t:["мини","чёлка","Russian glam"],d:"⭐",tip:"💡 Стрелки + красный + каблуки = Максим."},
-  {n:"Нюша",e:"Русский Поп · Россия",l:"Блестящий латексный комбинезон или мини-платье с эффектом мокрого шёлка. Высокий конский хвост, лаковые туфли.",t:["латекс","хвост","pop-glam"],d:"⭐⭐",tip:"💡 Хвост повыше, серьги побольше, платформа — nyusha.exe загружен."},
-  {n:"Валерия",e:"Русский Глэм · Россия",l:"Вечернее платье-русалка с блёстками или серебряный облегающий комбинезон. Пышные волосы, розово-бежевая помада.",t:["русалка","серебро","french glam"],d:"⭐",tip:"💡 Элегантный гламур — работает исключительно за счёт платья."},
-  {n:"t.A.T.u. — Лена (светлая)",e:"Ru-Pop Провокация · Россия",l:"Белая рубашка навыпуск, короткая плиссированная юбка, белые высокие гольфы, тяжёлые ботинки. Агрессивная стрелка.",t:["школьница","белый","tatu"],d:"⭐",tip:"💡 Работает в паре! Найди подругу для образа Юли."},
-  {n:"t.A.T.u. — Юля (тёмная)",e:"Ru-Pop Провокация · Россия",l:"Белая рубашка + клетчатый галстук, короткая юбка, тёмные прямые волосы. Тёмный лайнер, тяжёлые ботинки.",t:["школьница","клетка","tatu"],d:"⭐",tip:"💡 Образ для двоих — лучший дуэт вечера!"},
-  {n:"Земфира",e:"Русский Рок-Арт · Россия",l:"Рваные джинсы + косуха + яркий принт или просто белая майка. Минимум украшений, чёлка.",t:["рок","indie","rebel"],d:"⭐",tip:"💡 Контраст делает этот образ мощным — одна рокерша на фоне гламура."},
-  {n:"Жасмин / ВИА Гра",e:"Русский Сексуальный Поп · Россия",l:"Облегающее мини-платье с открытыми плечами или кожаный кроп + юбка-мини. Яркий макияж: стрелки + красный.",t:["мини","кожа","ViA Gra"],d:"⭐⭐",tip:"💡 Максимальная сексуальность при минимуме ткани."},
-  {n:"Наташа Бедингфилд",e:"Brit-Pop Girl · UK",l:"Яркое многоцветное мини-платье или джинсовая мини-юбка + топ с принтом. Пышные натуральные локоны.",t:["brit-pop","локоны","яркий"],d:"⭐",tip:"💡 Энергичный и свежий образ — радостно и сексуально одновременно."},
-  {n:"Дуа Липа (ранний период)",e:"Euro-Pop · UK/Kosovo",l:"Узкое кожаное мини + кроп или блестящее платье с вырезом. Волосы прямые и гладкие. Смелый smoky.",t:["кожа","мини","dark glam"],d:"⭐",tip:"💡 Минимализм с максимальным воздействием."},
-  {n:"Пэрис Хилтон",e:"It-Girl · USA",l:"Розовое или белое мини-платье в стразах. Блонд прямой, розовый глосс. Маленькая сумочка. Большие солнечные очки.",t:["розовый","it-girl","Y2K"],d:"⭐",tip:"💡 Розовый + стразы + сумка + «That's hot»."},
-  {n:"Николь Ричи",e:"Boho Chic · USA",l:"Бохо-мини + топ с открытыми плечами. Много слоёв украшений. Растрёпанные волосы, дымчатый глаз.",t:["boho","слои","festival"],d:"⭐",tip:"💡 Стиль «богатый хиппи» — образ уникален."},
-  {n:"Жанна Фриске",e:"Русский Поп-Глэм · Россия",l:"Облегающее блестящее платье или белый костюм с декольте. Длинные светлые волосы, яркая помада.",t:["блеск","блонд","russian star"],d:"⭐⭐",tip:"💡 Гламур по-русски. Платье + каблуки + роскошные волосы."},
-  {n:"Наталья Водянова (образ-муза)",e:"Supermodel · Russia/France",l:"Haute couture мини или облегающее платье fashion week. Идеальный макияж, гладкие волосы. Минимум украшений.",t:["supermodel","haute couture","чистота"],d:"⭐",tip:"💡 Образ супермодели: сила — в деталях и безупречности."},
-  {n:"Синди Кроуфорд (2000s comeback)",e:"Supermodel Icon · USA",l:"Элегантное облегающее платье с вырезом или кожаный корсет + широкие брюки. Роскошные тёмные волосы, нюдовый макияж, родинка-акцент.",t:["supermodel","elegance","classic"],d:"⭐",tip:"💡 Добавь родинку маркером."},
-  {n:"Кристина Милиан",e:"Pop R&B · USA",l:"Яркий кроп-топ + мини-юбка с принтом. Натуральные кудри или прямые волосы. Много браслетов, яркая помада.",t:["кроп","R&B","latina pop"],d:"⭐",tip:"💡 Latina pop energy — яркая, свежая, сексуальная."},
-  {n:"MTV VJ — Хозяйка вечера",e:"MTV VJ · USA",l:"Стильный джинсовый лук с кроп-топом или яркое мини. Высокий хвост. Много украшений. Микрофон MTV как аксессуар.",t:["MTV VJ","деним","microphone"],d:"⭐",tip:"💡 Добавь пластиковый микрофон — и станешь лицом MTV."},
-  {n:"Girls Aloud / Brit Pop Girl",e:"Brit Babe · UK",l:"Блестящее мини-платье или юбка-пачка + обтягивающий топ. Волны блонд, яркие губы.",t:["brit","блонд","sparkle"],d:"⭐",tip:"💡 Блонд + блеск + улыбка = британская красавица MTV 2000-х."},
-  {n:"Sugababes / Girl Group",e:"UK Girl Group · UK",l:"Мини-платье с акцентным поясом или кожаный кроп + юбка. Объёмные волосы. Дерзкий smoky.",t:["girl group","UK","мини"],d:"⭐",tip:"💡 Образ «участница британской поп-группы» — дерзкий, яркий."},
-  {n:"Кайли Миноуг — Fever Era",e:"Dancefloor Anthem · Australia",l:"Серебряный облегающий комбинезон или металлическое мини с вырезами. Блонд, металлические аксессуары.",t:["серебро","металлик","fever"],d:"⭐",tip:"💡 Всё должно блестеть. Металлик с ног до головы."},
-  {n:"Кэтти Перри (ранний период)",e:"Quirky Pop · USA",l:"Пышное платье с принтом еды или фруктов, или кожаное мини с игривыми деталями. Чёлка до бровей, красные губы.",t:["quirky","яркий","кэнди"],d:"⭐",tip:"💡 Кэти Перри = кэнди-поп. Чем ярче, тем лучше."},
-  {n:"Гвен Стефани",e:"Pop-Rock Queen · USA",l:"Красная помада — обязательно. Платиновый блонд, высокий хвост. Мини-юбка в клетку + кроп-топ с принтом.",t:["красная помада","блонд","hollaback"],d:"⭐⭐",tip:"💡 Референс: Hollaback Girl. Красная помада + белые гетры + идеальный блонд."},
-  {n:"Эми Уайнхаус",e:"Soul-Jazz Diva · UK",l:"Чёрное обтягивающее платье-футляр. ОБЯЗАТЕЛЬНО: высоченная причёска-башня. Очень толстые чёрные стрелки. Красный или нюдовый глосс.",t:["башня","стрелки","soul"],d:"⭐⭐⭐",tip:"💡 Образ строится вокруг причёски-башни. Без неё — другой человек."},
-  {n:"Леди Гага (ранний период)",e:"Pop-Art Avant-Garde · USA",l:"Боди + прозрачные колготки + гигантский бант на голове, или мини + платформы 30 см + стразы. Никаких правил.",t:["авангард","экстравагантность","art-pop"],d:"⭐⭐⭐",tip:"💡 Образ для тех, кто не боится ничего. Чем безумнее, тем ближе к Гаге."},
-  {n:"Ким Кардашьян (2005–2007)",e:"Glamour It-Girl · USA",l:"Облегающее платье с глубоким декольте или мини + корсет. Тёмные длинные волосы гладко уложены. Нюдовый макияж, контурирование.",t:["glamour","curves","2000s glam"],d:"⭐",tip:"💡 Сексуальный и гламурный образ без лишних слов."},
-  {n:"Наоми Кэмпбелл",e:"Supermodel · UK",l:"Облегающее вечернее платье с разрезом или кожаный костюм. Бронзовый тон. Высокие каблуки, минималистичный макияж.",t:["supermodel","подиум","fierce"],d:"⭐⭐",tip:"💡 Важнее всего осанка и взгляд. Наоми — это не одежда, это как ты ходишь."},
-  {n:"Кейт Мосс",e:"Supermodel · UK",l:"Джинсы скинни + жакет оверсайз или мини-платье. Растрёпанные волосы, тонкие стрелки, нюдовый глосс. Небрежно, но идеально.",t:["british","kate moss","indie"],d:"⭐",tip:"💡 Одеться как будто выбросила одежду из шкафа — и всё равно выглядишь лучше всех."},
-  {n:"Тайра Бэнкс",e:"Supermodel & TV Queen · USA",l:"Вечернее платье с акцентными деталями или облегающий образ ANTM. Пышные волосы, профессиональный макияж.",t:["ANTM","supermodel","glam"],d:"⭐⭐",tip:"💡 «Смайз» (smize — улыбка глазами) — секретное оружие образа Тайры."},
-  {n:"Хайди Клум",e:"Victoria's Secret · Germany",l:"Ангел Victoria's Secret: белый корсет или обтягивающее платье + белые крылья (опционально). Блонд, нюдовый макияж.",t:["VS Angel","блонд","подиум"],d:"⭐",tip:"💡 Белые крылья ангела Victoria's Secret — образ мгновенно узнаваемый."},
-  {n:"Памела Андерсон",e:"Baywatch Icon · USA/Canada",l:"Белый облегающий топ + обтягивающие джинсы с низкой посадкой. Пышные платиновые волосы с начёсом.",t:["baywatch","белый топ","platinum"],d:"⭐⭐",tip:"💡 Пышные платиновые волосы с начёсом — главная деталь."},
-  {n:"Кармен Электра",e:"MTV Bombshell · USA",l:"Красное облегающее платье с разрезом или красный кроп-топ + мини-юбка. Тёмные волосы, яркая красная помада.",t:["красный","MTV","sexy"],d:"⭐⭐",tip:"💡 Красный цвет — визитная карточка. Ничего кроме красного."},
-  {n:"Вера Брежнева (ВИА Гра)",e:"Русский Поп · Украина",l:"Светлое облегающее платье с открытыми плечами или мини пастельного цвета. Блонд, нежный макияж.",t:["ВИА Гра","блонд","нежность"],d:"⭐",tip:"💡 Нежная блондинка ВИА Гры — контраст с яркими образами."},
-  {n:"Анна Седокова (ВИА Гра)",e:"Русский Поп · Украина",l:"Красное облегающее мини-платье или яркий кроп + юбка. Тёмные волосы, красная помада или дымчатые тени.",t:["ВИА Гра","красный","sexy"],d:"⭐⭐",tip:"💡 Красный + тёмные волосы = образ Анны Седоковой."},
-  {n:"Надя Грановская (ВИА Гра)",e:"Русский Поп · Украина",l:"Чёрное облегающее мини-платье или чёрный кроп + кожаная юбка. Тёмные волосы, агрессивный smoky.",t:["ВИА Гра","чёрный","dangerous"],d:"⭐⭐",tip:"💡 Самая загадочная из ВИА Гры. Весь образ в тёмных тонах."},
-  {n:"Анна Семенович (Блестящие)",e:"Русский Поп · Россия",l:"Яркое блестящее платье или кроп-топ со стразами + мини-юбка. Каштановые или тёмно-русые волосы.",t:["Блестящие","стразы","яркий"],d:"⭐",tip:"💡 Образ участницы «Блестящих» — блеск и гламур в российском стиле."},
-  {n:"Лолита Милявская",e:"Русский Эпатаж · Россия",l:"Мини-платье с нестандартными деталями, яркий принт или полупрозрачная ткань. Вуаль, шляпа или боа как аксессуар.",t:["эпатаж","экстравагантность","Лолита"],d:"⭐⭐⭐",tip:"💡 Лолита = эпатаж. Чем неожиданнее, тем точнее образ."},
-  {n:"Ксения Собчак (светские хроники)",e:"Гламур нулевых · Россия",l:"Вечернее мини с блёстками или облегающее платье пастельного цвета. Блонд, нюдовый макияж, маленькая брендовая сумочка.",t:["гламур","блонд","светская жизнь"],d:"⭐",tip:"💡 Образ «светской дивы нулевых» — дорого, блонд, каблуки, сумочка."},
-];
-
-const BD=[
-  {n:"Джастин Тимберлейк",e:"Pop Star · USA",l:"Костюм-двойка + расстёгнутая рубашка без галстука. Гель в волосы, загар. ИЛИ белый смокинг + сетчатая рубашка (FutureSex era).",t:["костюм","pop","JT"],d:"⭐",tip:"💡 Кожаный ремень + туфли без носков = JT mode."},
-  {n:"Эминем",e:"Rap God · USA",l:"Белая майка-алкоголичка + мешковатые белые джинсы (Slim Shady) ИЛИ зелёные карго + зелёный худи + кепка (Without Me).",t:["белый","oversized","slim shady"],d:"⭐⭐",tip:"💡 Цепочка + кепка козырьком + рассеянный взгляд — Slim Shady."},
-  {n:"Jay-Z",e:"Rap Mogul · USA",l:"Светлый ультра-оверсайз джинсовый костюм. Платиновые цепочки до пупа, баскетбольные кроссы, кепка Yankee.",t:["деним","bling","chains"],d:"⭐",tip:"💡 Цепочка с кулоном размером с кулак — это правило."},
-  {n:"Канье Уэст",e:"Prep Rap · USA",l:"Поло Ralph Lauren поверх белой рубашки (воротник поднят). Розовый или пастельный цвет. Рюкзак-мишка.",t:["polo","prep","kanye"],d:"⭐",tip:"💡 Рюкзак или маленькая сумка через плечо — финальный штрих."},
-  {n:"Ашер",e:"R&B Icon · USA",l:"Белая облегающая майка + кожаные брюки с цепью. Либо пиджак без рубашки с открытой грудью.",t:["майка","цепь","R&B"],d:"⭐⭐",tip:"💡 Спортивное тело = образ. Чем меньше ткани, тем лучше."},
-  {n:"Нелли",e:"Rap Swag · USA",l:"Мешковатые джинсы + безрукавка-сетка или обрезанная майка. Кепка набекрень, пластырь под глазом.",t:["сетка","кепка","nelly"],d:"⭐⭐",tip:"💡 Пластырь на щеке — культовая деталь. Без него образ неполный."},
-  {n:"50 Cent",e:"Street King · USA",l:"Белая майка без рукавов + мешковатые джинсы G-Unit. Бандана или кепка. Много тяжёлых цепей.",t:["G-unit","бандана","street"],d:"⭐⭐",tip:"💡 Бронзовый крест на толстой цепи — обязательно."},
-  {n:"Backstreet Boys (AJ McLean)",e:"Boy Band · USA",l:"Тёмная приталенная рубашка с орнаментом + кожаные брюки. Кожаная кепка козырьком вперёд, татуировки.",t:["рубашка","кожа","boyband"],d:"⭐⭐",tip:"💡 Запах Cool Water + уверенная улыбка + кожаная кепка — BSB."},
-  {n:"Честер Беннингтон (Linkin Park)",e:"Nu-Metal · USA",l:"Рваная майка + узкие чёрные джинсы. Татуировки маркером. Волосы: с прядью на глаз или обесцвеченные.",t:["rock","рваное","nu-metal"],d:"⭐⭐",tip:"💡 Подводка для глаз + чёрный браслет + ботинки = Честер-энергия."},
-  {n:"Фред Дёрст (Limp Bizkit)",e:"Nu-Metal King · USA",l:"Красная кепка козырьком назад + красная толстовка оверсайз + широкие карго-брюки. Кеды.",t:["красная кепка","limp bizkit","карго"],d:"⭐⭐",tip:"💡 Красный + красный + красный. Монохром Фреда Дёрста."},
-  {n:"Ди Анджело",e:"Neo-Soul God · USA",l:"Голый торс + мешковатые спортивные брюки. Кудри, минимум украшений. Образ полностью строится на теле и взгляде.",t:["без рубашки","neo-soul","voodoo"],d:"⭐⭐⭐",tip:"💡 Самый смелый мужской образ. Для тех, кто физически к нему готов."},
-  {n:"Крис Мартин (Coldplay)",e:"Brit-Pop · UK",l:"Облегающие чёрные брюки + V-образная майка. Надписи на ладонях маркером. Взъерошенные мокрые волосы.",t:["british","indie","маркер"],d:"⭐",tip:"💡 Надписи на ладонях маркером — фирменная деталь."},
-  {n:"Дейвид Бэкхем",e:"Metrosexual God · UK",l:"Низкие джинсы на бёдрах + белая приталенная рубашка навыпуск. Серьги в обоих ушах, браслеты, идеальный загар.",t:["beckham","metrosexual","джинсы"],d:"⭐",tip:"💡 Серьга + идеальная стрижка с гелем + уверенность — и ты Бекхэм."},
-  {n:"Крейг Дэвид",e:"UK R&B · UK",l:"Жилет без рубашки или обтягивающая рубашка + широкие брюки. Узкая goatee-бородка, серьга.",t:["жилет","UK R&B","goatee"],d:"⭐",tip:"💡 Аккуратная бородка-эспаньолка — визитная карточка."},
-  {n:"Робби Уильямс",e:"Pop-Rock · UK",l:"Узкий чёрный пиджак без рубашки (открытый торс) или белая рубашка с расстёгнутыми пуговицами. Взъерошенные волосы.",t:["пиджак","open shirt","british pop"],d:"⭐",tip:"💡 Пиджак без рубашки = харизма в кубе. Образ требует улыбки."},
-  {n:"Борис Моисеев",e:"Русский Шоу-Бизнес · Россия",l:"Блестящий пиджак с пайетками или белое трико с пышным рукавом. Театральный грим: стрелки, румяна, блеск.",t:["пайетки","театр","легенда"],d:"⭐⭐⭐",tip:"💡 Самый яркий образ среди парней — для самого смелого гостя."},
-  {n:"Дима Билан",e:"Русский Поп · Россия",l:"Обтягивающий белый костюм или белая рубашка с блестящими деталями + узкие белые брюки. Укладка-вихром на лоб.",t:["белый","russian pop","bilan"],d:"⭐",tip:"💡 Белый на белом + завораживающий взгляд вверх = Дима Билан mode."},
-  {n:"Влад Топалов (Smash!!!)",e:"Русский R&B · Россия",l:"Спортивный костюм Adidas (синий или чёрный) + кепка козырьком вперёд + кроссовки. Золотая цепочка.",t:["adidas","Smash","R&B"],d:"⭐⭐",tip:"💡 Три полоски + кепка + золото = Smash era."},
-  {n:"Сергей Лазарев (Smash!!!)",e:"Русский Поп · Россия",l:"Облегающий кожаный костюм или чёрная рубашка с блестящими вставками + узкие чёрные брюки. Укладка набок.",t:["кожа","Smash","глянец"],d:"⭐⭐",tip:"💡 Лазерный взгляд + кожаный пиджак + туфли = мечта 2000-х."},
-  {n:"Рики Мартин",e:"Latin Explosion · Puerto Rico",l:"Облегающая белая рубашка с расстёгнутой верхней частью + чёрные брюки. Гладкие волосы, тёмный загар.",t:["latin","открытая рубашка","белый"],d:"⭐",tip:"💡 Образ требует танца — Livin' La Vida Loca обязательна."},
-  {n:"Марк Энтони",e:"Latin Pop · USA",l:"Тёмный костюм-двойка + белая рубашка без галстука. Тёмные волосы назад, выразительный взгляд.",t:["костюм","latin","элегантность"],d:"⭐",tip:"💡 Элегантный контраст на фоне ярких образов."},
-  {n:"Снуп Догг",e:"G-Funk Legend · USA",l:"Длинная джинсовая рубашка оверсайз + бандана + кепка с прямым козырьком. Цепочки до колен. Неспешная осанка.",t:["G-funk","бандана","snoop"],d:"⭐⭐",tip:"💡 Прищуренный взгляд + замедленные движения = Snoop Dogg energy."},
-  {n:"Фарелл Уильямс",e:"Pharrell Mode · USA",l:"Яркая худи-толстовка оверсайз + редкие кроссовки. Маленькая кепочка, тонкие прямоугольные очки.",t:["oversized","кроссовки","N*E*R*D"],d:"⭐",tip:"💡 Детали решают всё: крутые кроссы + редкая кепка + спокойствие."},
-  {n:"Принс",e:"Pop Royalty · USA",l:"Фиолетовый пиджак с пышными рукавами + белое кружевное жабо. Каблуки. Кудрявые волосы.",t:["фиолетовый","кружево","prince"],d:"⭐⭐⭐",tip:"💡 Каблуки + кружево + фиолет = Принс. Для самого уверенного в зале."},
-  {n:"P. Diddy (Puff Daddy)",e:"Hip-Hop Mogul · USA",l:"Белый льняной костюм + белая рубашка. Белые туфли. Всё белое. Огромные часы, массивный золотой перстень.",t:["white total","mogul","P.Diddy"],d:"⭐⭐",tip:"💡 Total white look = luxury hip-hop. Без единого тёмного элемента."},
-  {n:"Том ДеЛонг (Blink-182)",e:"Pop-Punk · USA",l:"Обтягивающая майка с принтом + широкие клетчатые шорты + кеды. Кепка козырьком.",t:["pop-punk","blink182","кеды"],d:"⭐",tip:"💡 Образ «подросток на скейтборде» — но с харизмой MTV."},
-  {n:"Крис Браун (ранний)",e:"Pop R&B · USA",l:"Спортивная майка + лоу-райз джинсы + кроссовки Air Force One. Кепка. Перчатки без пальцев + браслеты.",t:["спорт","AF1","dancer"],d:"⭐",tip:"💡 Перчатки без пальцев — фирменная деталь. Добавь танцевальные движения."},
-  {n:"Тимбалэнд",e:"Hip-Hop Producer · USA",l:"Кожаный жилет на голое тело + широкие брюки. Очки-авиаторы, большие наушники на шее.",t:["жилет","авиаторы","producer"],d:"⭐",tip:"💡 Наушники на шее — главный аксессуар продюсера 2000-х."},
-  {n:"Боно (U2)",e:"Rock Legend · Ireland",l:"Узкий кожаный пиджак + тёмная рубашка. Культовые зеркальные очки в форме капли — обязательно.",t:["кожаный пиджак","очки","rock god"],d:"⭐",tip:"💡 Без зеркальных очков образ Боно невозможен."},
-  {n:"2Pac — «California Love»",e:"West Coast Legend · USA",l:"Бандана на голове + чёрная майка без рукавов + мешковатые джинсы. Татуировки видны, тяжёлые цепи.",t:["бандана","west coast","2pac"],d:"⭐⭐",tip:"💡 Взгляд прямо + осанка «сверху вниз» + бандана = 2Pac tribute."},
-  {n:"Джеймс Браун — Tribute",e:"Funk Godfather · USA",l:"Ярко-красный костюм с двубортными лацканами + чёрная рубашка. Волосы зализаны. Танцевальные туфли.",t:["красный костюм","funk","godfather"],d:"⭐⭐",tip:"💡 Образ требует одного фирменного движения при входе в зал."},
-  {n:"Ромео Сантос / Aventura",e:"Bachata King · Dominican Rep.",l:"Тёмная рубашка с орнаментом + приталенные брюки. Гладкие тёмные волосы, немного серебра.",t:["bachata","рубашка","latino"],d:"⭐",tip:"💡 Образ латинского певца — для тех, кто умеет танцевать."},
-  {n:"Децл (Le Truk)",e:"Русский Рэп · Россия",l:"Оверсайз hoodie + широкие карго-брюки + кепка набекрень. Цепочки, кроссовки.",t:["рэп","оверсайз","децл"],d:"⭐⭐",tip:"💡 Образ первого русского рэпера MTV — «Вечеринка» в крови."},
-  {n:"Валерий Меладзе",e:"Русский Романтик · Россия",l:"Тёмный приталенный костюм + расстёгнутая на 1-2 пуговицы рубашка. Тёмные волосы, пронзительный взгляд.",t:["костюм","романтик","меладзе"],d:"⭐",tip:"💡 Образ певца, от которого сходили с ума все женщины 2000-х."},
-  {n:"Иван Дорн",e:"Поп-R&B · Ukraine",l:"Ретро-пиджак оверсайз + узкие брюки + кроссовки или лоферы. Очки, шляпа, эклектичные аксессуары.",t:["эклектика","ретро","artist"],d:"⭐",tip:"💡 Шляпа + очки + любой пиджак = моментальное превращение в Дорна."},
-  {n:"Дима Маликов",e:"Русский Поп-Пианист · Россия",l:"Строгий чёрный костюм или бархатный пиджак. Белая рубашка, галстук или бабочка. Укладка с гелем.",t:["костюм","пианист","классика"],d:"⭐",tip:"💡 Образ элегантного русского музыканта — аристократично."},
-  {n:"Николай Басков — Эстрада",e:"Русская Эстрада · Россия",l:"Белый или золотой концертный смокинг с широким галстуком. Нагрудный платок, запонки.",t:["смокинг","эстрада","золото"],d:"⭐⭐",tip:"💡 Русская эстрада 2000-х: дорого, богато, смокинг."},
-  {n:"D12 / Detroit Rap",e:"Detroit Rap · USA",l:"Толстовка оверсайз с надписью + широкие спортивные штаны + Air Jordan. Кепка козырьком назад.",t:["hoodie","detroit","street rap"],d:"⭐",tip:"💡 Образ «просто вышел из студии». Вся сила — в лице и жестах."},
-  {n:"Джек Блэк — Tenacious D",e:"Comedy Rock · USA",l:"Чёрная майка с принтом + чёрные джинсы. Взъерошенные волосы, борода несколько дней.",t:["rock","майка","комик"],d:"⭐",tip:"💡 Самый расслабленный образ вечера — просто чёрный верх."},
-  {n:"Энрике Иглесиас",e:"Latin Pop · Spain",l:"Белая облегающая рубашка навыпуск + джинсы с низкой посадкой. Тёмные волосы, небольшая щетина. Открытая верхняя пуговица.",t:["latin","рубашка","escape"],d:"⭐",tip:"💡 Рубашка + джинсы + взгляд «я знаю, что ты хочешь» = Энрике."},
-  {n:"Ленни Кравиц",e:"Rock-Soul Icon · USA",l:"Кожаная куртка с бахромой или кожаные брюки + расстёгнутая до пупа рубашка. Крупные очки в тёмной оправе, дреды или афро.",t:["кожа","дреды","rock-soul"],d:"⭐⭐",tip:"💡 Ленни Кравиц = кожа + дреды + крупные очки + харизма рок-бога."},
-  {n:"Тархан",e:"Turkish Pop · Turkey",l:"Рубашка с орнаментом или приталенная рубашка + джинсы. Тёмные тщательно уложенные волосы.",t:["turkish pop","рубашка","kiss kiss"],d:"⭐",tip:"💡 Референс: клип Kiss Kiss. Аккуратность + харизма = Тархан."},
-  {n:"Билл Каулитц (Tokio Hotel)",e:"Emo-Rock · Germany",l:"Облегающие чёрные джинсы + узкий пиджак или косуха. Высоченная взъерошенная чёрная причёска с лаком. Чёрная подводка кругом глаз.",t:["emo","tokio hotel","gothic rock"],d:"⭐⭐⭐",tip:"💡 Высокая тёмная причёска + чёрная подводка кругом глаз. Иначе это не Билл."},
-  {n:"Тимати (ранний период)",e:"Русский Рэп · Россия",l:"Пиджак оверсайз + цепь или спортивный стиль. Тёмные волосы или бритая голова. Крупные часы, цепь с кулоном.",t:["russian rap","пиджак","bling"],d:"⭐⭐",tip:"💡 Тимати с Фабрики звезд — оверсайз + bling. Добавь значок Black Star."},
-  {n:"Филипп Киркоров",e:"Русская Эстрада · Россия",l:"Костюм полностью в стразах и пайетках. Яркий грим, высокие каблуки (опционально), перья или мех как аксессуар.",t:["стразы","пайетки","король эстрады"],d:"⭐⭐⭐",tip:"💡 ТРЕБУЕТ стразов на всём. Кириков = блеск в каждой клетке. Чем больше — тем лучше."},
-  {n:"Сергей Зверев",e:"Русский Эпатаж · Россия",l:"Яркий цвет волос (платина, рыжий, розовый), облегающий блестящий костюм или кожаный комплект. Театральный макияж.",t:["эпатаж","яркий","стилист звёзд"],d:"⭐⭐⭐",tip:"💡 Волосы — ключевая деталь. Главный эпатаж мужской моды 2000-х."},
-  {n:"Шура",e:"Русский Поп · Россия",l:"Очень яркий образ: неоновые цвета, блеск, нестандартный силуэт. Образ в духе «конфетного поп» с розовыми деталями.",t:["яркий","neon","russian pop"],d:"⭐⭐⭐",tip:"💡 Образ Шуры = яркость до предела. Нет такого понятия как «слишком много цвета»."},
-  {n:"Витас",e:"Русская Классическая Эстрада · Россия",l:"Белый сценический костюм с широкими рукавами — строгий, почти оперный. Аккуратно уложенные светлые волосы.",t:["белый","опера","Витас"],d:"⭐⭐⭐",tip:"💡 Белый костюм + чистый вокал при входе в зал. Референс: Опера №2."},
-  {n:"Джаред Лето (30 Seconds to Mars)",e:"Alt-Rock · USA",l:"Облегающие чёрные кожаные брюки + рваная или сетчатая майка. Длинные тёмные волосы с чёлкой. Тонкие стрелки, кожаные браслеты.",t:["alt-rock","кожа","jared leto"],d:"⭐⭐",tip:"💡 Длинные волосы + кожаные брюки + стрелки = рок-бог 2005 года."},
-  {n:"Илья Лагутенко (Мумий Тролль)",e:"Русский Рок · Россия",l:"Яркий пиджак с принтом + джинсы, или морская тематика (тельняшка + бескозырка). Взъерошенные волосы, загадочный взгляд.",t:["русский рок","морской стиль","мумий тролль"],d:"⭐⭐",tip:"💡 Тельняшка + взъерошенность + морская романтика."},
-  {n:"Akon",e:"R&B · Senegal/USA",l:"Белая рубашка или майка + широкие брюки. Цепочки. Тёмный загар, уверенная осанка.",t:["R&B","белая рубашка","akon"],d:"⭐",tip:"💡 Akon = простой но стильный. Белое + золото + обаяние."},
-  {n:"Pitbull (ранний период)",e:"Latin Hip-Hop · USA/Cuba",l:"Белый костюм или светлая рубашка + брюки. Лысая голова. Тёмные очки-авиаторы.",t:["latin hip-hop","белый костюм","dale"],d:"⭐",tip:"💡 Pitbull = белый костюм + лысая голова + очки + «Dale!»."},
-  {n:"Fall Out Boy (Пит Уэнц)",e:"Pop-Punk · USA",l:"Облегающие чёрные джинсы скинни + узкая чёрная футболка с принтом группы. Чёлка, закрывающая половину лица. Много браслетов, подводка.",t:["emo","pop-punk","fall out boy"],d:"⭐⭐",tip:"💡 Эмо-культура 2000-х: чёрное всё + чёлка + подводка."},
-  {n:"Сергей Жуков (Руки Вверх!)",e:"Русский Поп · Россия",l:"Спортивный образ или яркая рубашка с принтом + джинсы. Весёлый и энергичный образ российского поп-артиста 2000-х.",t:["Руки Вверх","russian pop","dance"],d:"⭐",tip:"💡 Весёлый российский поп. Рубашка + джинсы + улыбка."},
-  {n:"Андрей Губин",e:"Русский Поп · Россия",l:"Приталенная рубашка или пиджак + джинсы. Аккуратная укладка, образ «красивого русского певца» нулевых.",t:["russian pop","романтик","губин"],d:"⭐",tip:"💡 Образ нежного «плохого мальчика» 2000-х. Джинсы + рубашка + кудри."},
-  {n:"Стас Пьеха",e:"Русский Поп · Россия",l:"Костюм или строгая рубашка + брюки. Аккуратная стрижка, образ молодого российского шансонье нулевых.",t:["russian pop","костюм","пьеха"],d:"⭐",tip:"💡 Аккуратный, стильный, без лишних деталей."},
-  {n:"Валерий Леонтьев",e:"Советский и Российский Поп · Россия",l:"Яркий сценический костюм с нестандартным кроем + приталенный силуэт. Взъерошенная причёска, артистичный грим.",t:["эстрада","сценический образ","Леонтьев"],d:"⭐⭐",tip:"💡 Леонтьев = артистичность + нестандартный костюм. Эксцентрика в каждой детали."},
-];
-
-// ── STATE ──────────────────────────────────────
-let bookings = {};
-let myBookings = {};
-let pending = null;
-let adminIn = false;
-
-// ── API CALLS ──────────────────────────────────
-async function apiGet(path) {
-  const r = await fetch(API_BASE + path);
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
-}
-async function apiPost(path, body) {
-  const r = await fetch(API_BASE + path, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body)
-  });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
-}
-
-async function loadBookings() {
-  try {
-    const data = await apiGet('/bookings');
-    bookings = data || {};
-  } catch(e) {
-    console.error('Load error:', e);
-    bookings = {};
-  }
-}
-
-// ── RENDER ─────────────────────────────────────
-function cardHTML(d, type, i) {
-  const id = `${type}-${i}`;
-  const bk = bookings[id];
-  const mine = !!myBookings[id];
-  const cls = `card ${type==='g'?'g':'b'}${bk?' bkd':''}${mine?' mine':''}`;
-  return `<div class="${cls}" id="card-${id}">
-    <div class="badge-mine">МОЙ ОБРАЗ ✓</div>
-    <div class="badge-bkd">ЗАБРОНИРОВАНО</div>
-    <div class="c-num">${type==='g'?'♀':'♂'} ${String(i+1).padStart(2,'0')}</div>
-    <div class="c-name">${d.n}</div>
-    <div class="c-era">${d.e}</div>
-    <div class="c-look">${d.l}</div>
-    <div class="c-tags">${d.t.map(x=>`<span class="tag">${x}</span>`).join('')}</div>
-    <div class="c-diff">${d.d} сложность</div>
-    <div class="c-tip">${d.tip}</div>
-    ${!bk ? `<button class="btn-bk" onclick="openM('${id}','${d.n.replace(/'/g,"\\'")}')">Забронировать образ</button>` : ''}
-    ${mine ? `<button class="btn-cncl" onclick="cancelBook('${id}')">Отменить мою бронь</button>` : ''}
-  </div>`;
-}
-
-function updateCounts() {
-  const gLen = GD.length, bLen = BD.length;
-  document.getElementById('cnt-g').textContent = gLen;
-  document.getElementById('cnt-b').textContent = bLen;
-  document.getElementById('num-g').textContent = gLen;
-  document.getElementById('num-b').textContent = bLen;
-  const tot = Object.keys(bookings).length;
-  const total = gLen + bLen;
-  document.getElementById('hero-sub').textContent = `🎤 ${total} образов · ${total-tot} свободных · ${tot} забронировано`;
-}
-
-function render() {
-  document.getElementById('grid-g').innerHTML = GD.map((d,i) => cardHTML(d,'g',i)).join('');
-  document.getElementById('grid-b').innerHTML = BD.map((d,i) => cardHTML(d,'b',i)).join('');
-  updateCounts();
-  if (adminIn) renderAdmin();
-}
-
-// ── MODAL ──────────────────────────────────────
-function openM(id, name) {
-  if (bookings[id]) { toast('Образ уже занят','err'); return; }
-  pending = id;
-  document.getElementById('m-card').textContent = 'Образ: ' + name;
-  document.getElementById('inp-name').value = '';
-  document.getElementById('inp-phone').value = '';
-  document.getElementById('err-name').style.display = 'none';
-  document.getElementById('err-phone').style.display = 'none';
-  document.getElementById('modal').classList.add('open');
-  setTimeout(() => document.getElementById('inp-name').focus(), 150);
-}
-
-document.getElementById('btn-cls').onclick = () => {
-  document.getElementById('modal').classList.remove('open');
-  pending = null;
-};
-
-document.getElementById('btn-ok').onclick = async () => {
-  const name = document.getElementById('inp-name').value.trim();
-  const phone = document.getElementById('inp-phone').value.trim();
-  let ok = true;
-  document.getElementById('err-name').style.display = name ? 'none' : 'block'; if (!name) ok = false;
-  document.getElementById('err-phone').style.display = phone ? 'none' : 'block'; if (!phone) ok = false;
-  if (!ok) return;
-
-  const btn = document.getElementById('btn-ok');
-  btn.disabled = true; btn.textContent = 'Сохраняем...';
-
-  try {
-    const res = await apiPost('/book', { id: pending, name, phone });
-    if (res.ok) {
-      bookings[pending] = { name, phone, bookedAt: res.bookedAt };
-      myBookings[pending] = true;
-      document.getElementById('modal').classList.remove('open');
-      render();
-      toast(`✓ Образ забронирован, ${name}!`, 'ok');
-    } else if (res.taken) {
-      document.getElementById('modal').classList.remove('open');
-      await loadBookings(); render();
-      toast('Упс — образ только что забрали!', 'err');
-    }
-  } catch(e) {
-    toast('Ошибка сети — попробуй ещё раз', 'err');
-  }
-
-  btn.disabled = false; btn.textContent = 'Забронировать ✓';
-};
-
-async function cancelBook(id) {
-  if (!myBookings[id]) return;
-  try {
-    await apiPost('/cancel', { id });
-    delete bookings[id]; delete myBookings[id];
-    render(); toast('Бронь отменена', '');
-  } catch(e) { toast('Ошибка — попробуй ещё раз', 'err'); }
-}
-
-// ── TABS ───────────────────────────────────────
-function show(s, btn) {
-  ['g','b','a'].forEach(x => document.getElementById('sec-'+x).classList.toggle('hidden', x !== s));
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('ag','ab','aa'));
-  btn.classList.add(s==='g' ? 'ag' : s==='b' ? 'ab' : 'aa');
-}
-
-// ── ADMIN ──────────────────────────────────────
-function aLogin() {
-  if (document.getElementById('adm-pwd').value === ADMIN_PWD) {
-    adminIn = true;
-    document.getElementById('adm-login').classList.add('hidden');
-    document.getElementById('adm-panel').classList.remove('hidden');
-    renderAdmin();
-  } else { document.getElementById('adm-err').classList.remove('hidden'); }
-}
-function aLogout() {
-  adminIn = false;
-  document.getElementById('adm-login').classList.remove('hidden');
-  document.getElementById('adm-panel').classList.add('hidden');
-  document.getElementById('adm-pwd').value = '';
-  document.getElementById('adm-err').classList.add('hidden');
-}
-
-function renderAdmin() {
-  const entries = Object.entries(bookings).sort((a,b) => new Date(a[1].bookedAt)-new Date(b[1].bookedAt));
-  const gc = entries.filter(([id]) => id.startsWith('g')).length;
-  const bc = entries.filter(([id]) => id.startsWith('b')).length;
-  const total = GD.length + BD.length;
-  document.getElementById('adm-stats').innerHTML = `
-    <div class="stat"><div class="stat-n">${entries.length}</div><div class="stat-l">Всего броней</div></div>
-    <div class="stat"><div class="stat-n">${gc}</div><div class="stat-l">Женских</div></div>
-    <div class="stat"><div class="stat-n">${bc}</div><div class="stat-l">Мужских</div></div>
-    <div class="stat"><div class="stat-n">${total - entries.length}</div><div class="stat-l">Свободных</div></div>`;
-  const tb = document.getElementById('adm-tbody');
-  if (!entries.length) { tb.innerHTML = `<tr><td colspan="7" class="empty-tbl">Пока нет ни одной брони</td></tr>`; return; }
-  tb.innerHTML = entries.map(([id, bk], i) => {
-    const isG = id.startsWith('g');
-    const idx = parseInt(id.split('-')[1]);
-    const data = isG ? GD : BD;
-    const cn = data[idx] ? data[idx].n : id;
-    const dt = new Date(bk.bookedAt).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
-    return `<tr>
-      <td style="color:rgba(255,255,255,.35)">${i+1}</td>
-      <td><strong>${bk.name}</strong></td>
-      <td style="color:rgba(255,255,255,.7)">${bk.phone}</td>
-      <td>${cn}</td>
-      <td><span class="${isG?'bdg-g':'bdg-b'}">${isG?'♀ Девушка':'♂ Парень'}</span></td>
-      <td style="color:rgba(255,255,255,.45);white-space:nowrap">${dt}</td>
-      <td><button class="btn-adm-del" onclick="aDel('${id}')">Удалить</button></td>
-    </tr>`;
-  }).join('');
-}
-
-async function aDel(id) {
-  try {
-    await apiPost('/admin/delete', { id, pwd: ADMIN_PWD });
-    delete bookings[id]; delete myBookings[id];
-    render(); toast('Бронь удалена', '');
-  } catch(e) { toast('Ошибка', 'err'); }
-}
-
-function exportCSV() {
-  const entries = Object.entries(bookings).sort((a,b) => new Date(a[1].bookedAt)-new Date(b[1].bookedAt));
-  const rows = [['#','Имя','Телефон','Образ','Тип','Дата и время']];
-  entries.forEach(([id, bk], i) => {
-    const isG = id.startsWith('g');
-    const idx = parseInt(id.split('-')[1]);
-    const data = isG ? GD : BD;
-    const cn = data[idx] ? data[idx].n : id;
-    rows.push([i+1, bk.name, bk.phone, cn, isG?'Девушка':'Парень', new Date(bk.bookedAt).toLocaleString('ru-RU')]);
-  });
-  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mtv_bookings.csv'; a.click();
-}
-
-// ── TOAST ──────────────────────────────────────
-let tt;
-function toast(msg, type) {
-  const el = document.getElementById('toast');
-  el.textContent = msg; el.className = `toast ${type} show`;
-  clearTimeout(tt); tt = setTimeout(() => el.classList.remove('show'), 3200);
-}
-
-// ── INIT ───────────────────────────────────────
-async function init() {
-  await loadBookings();
-  render();
-  document.getElementById('loader').classList.add('gone');
-  setInterval(async () => {
-    const prev = JSON.stringify(bookings);
-    await loadBookings();
-    if (JSON.stringify(bookings) !== prev) render();
-  }, 10000);
-}
-init();
-</script>
-</body>
-</html>
-{"name":"mtv-party","version":"1.0.0","main":"server.js","scripts":{"start":"node server.js"},"engines":{"node":">=16"}}
